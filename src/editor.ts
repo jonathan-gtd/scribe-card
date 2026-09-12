@@ -12,7 +12,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
-import { cleanConfig, editorSchema, HELPERS, LABELS, type Schema } from "./editor-schema";
+import { cleanConfig, editorSchema, formData, HELPERS, LABELS, type Schema } from "./editor-schema";
 import { runQuery } from "./query";
 import type { HomeAssistant, ScribeCardConfig } from "./types";
 
@@ -88,7 +88,7 @@ export class ScribeCardEditor extends LitElement {
     return html`
       <ha-form
         .hass=${this.hass}
-        .data=${this._config}
+        .data=${formData(this._config)}
         .schema=${editorSchema(this._columns)}
         .computeLabel=${this._label}
         .computeHelper=${this._helper}
