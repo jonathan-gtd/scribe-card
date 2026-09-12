@@ -103,7 +103,14 @@ const rig = await up();
 console.log(`  ${await seed()} rows of history`);
 
 const browser = await chromium.launch({ executablePath: chromiumPath() });
-const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+// The frontend takes its language from the browser unless a profile says
+// otherwise, so the browser is told rather than asked: a runner in English
+// would quietly check nothing here.
+const page = await browser.newPage({
+  viewport: { width: 1100, height: 900 },
+  locale: "fr-FR",
+  timezoneId: "Europe/Paris",
+});
 
 /**
  * What the browser complained about once the card was on screen.
@@ -164,6 +171,12 @@ phase = "setup";
 // its own, because the landing page is no longer a Lovelace one.
 await page.evaluate(async (config) => {
   const hass = document.querySelector("home-assistant").hass;
+  // The profile language, as the profile page itself saves it.
+  await hass.callWS({
+    type: "frontend/set_user_data",
+    key: "language",
+    value: { language: "fr" },
+  });
   await hass.callWS({
     type: "lovelace/resources/create",
     res_type: "module",
@@ -215,7 +228,7 @@ await check("a query that fails says what the database said", async () => {
 
 await check("the axis is written in the language the instance is in", async () => {
   const locale = await page.evaluate(() => document.querySelector("home-assistant").hass.locale);
-  assert.equal(locale.language, "fr", "the rig did not onboard in French");
+  assert.equal(locale.language, "fr", `the instance is in ${locale.language}, not French`);
 
   // ECharts draws to a canvas, so the proof is in the option it was given.
   const labels = await card(page, 0).evaluate((element) => {

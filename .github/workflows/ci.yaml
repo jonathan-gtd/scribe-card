@@ -92,11 +92,8 @@ jobs:
         # and the built card, onboards over the API, and drives the real
         # frontend. This is what catches what a fake `hass` cannot: the shape
         # Home Assistant rejects a service call with, and `ha-form`.
+        # It prints Home Assistant's own log itself when something fails.
         run: npm run e2e
-
-      - name: What Home Assistant said, if it failed
-        if: failure()
-        run: docker logs --tail 100 scribe-card-e2e-ha || true
 
   hacs:
     name: HACS
