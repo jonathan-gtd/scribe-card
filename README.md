@@ -2,6 +2,10 @@
 
 A Lovelace card that charts the result of a SQL query, through the [Scribe](https://github.com/jonathan-gtd/scribe) integration.
 
+![Two Scribe cards: daily minimum, average and maximum temperature over a month, and states recorded per hour](docs/screenshot.png)
+
+_The card itself, rendered with sample rows by `npm run screenshot`._
+
 Scribe stores your Home Assistant history in TimescaleDB. This card puts any query against it on a dashboard — a year of temperatures averaged by day, the ten entities writing the most rows, the compression ratio of your database over time. Anything you can write in SQL.
 
 The query goes through Scribe's `scribe.query` service, not to the database: **there is no second connection to configure and no database password in your dashboard**. Home Assistant's own authentication applies, and Scribe runs every query in a read-only transaction with a time limit.
