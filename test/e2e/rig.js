@@ -76,11 +76,14 @@ async function waitFor(what, check, { timeout = 180_000, every = 1000 } = {}) {
 async function writeConfig() {
   const dir = await mkdtemp(resolve(tmpdir(), "scribe-card-e2e-"));
 
-  // Only what a dashboard needs. `default_config` would pull in Bluetooth and
-  // a dozen discoveries that make a container take minutes to boot.
+  // `default_config`, not a hand-picked list: the frontend calls commands that
+  // the standard integrations provide, and an instance without them rejects
+  // those with "unknown_command" — noise that is not the card's, and that a
+  // real instance would never make.
   await writeFile(
     resolve(dir, "configuration.yaml"),
-    `homeassistant:
+    `default_config:
+homeassistant:
   name: Scribe Card E2E
   latitude: 48.85
   longitude: 2.35
@@ -89,12 +92,6 @@ async function writeConfig() {
   country: FR
   currency: EUR
   unit_system: metric
-frontend:
-http:
-websocket_api:
-api:
-config:
-person:
 lovelace:
   mode: storage
 logger:
@@ -225,8 +222,36 @@ export async function sql(statement) {
   return docker(["exec", "-i", DB, "psql", "-U", "scribe", "-d", "scribe", "-At", "-c", statement]);
 }
 
-export async function up({ quiet = false } = {}) {
+/**
+ * Put the bundle that is on disk now into a standing instance.
+ *
+ * `writeConfig` copies it once, when the container is made; reusing an
+ * instance to look at a change would otherwise show the change that was built
+ * an hour ago.
+ */
+export async function installCard() {
+  await docker(["cp", resolve(root, "dist/scribe-card.js"), `${HA}:/config/www/scribe-card.js`]);
+}
+
+/** Whether an instance from an earlier run is still answering. */
+export async function isUp() {
+  const answer = await fetch(`${BASE_URL}/api/onboarding`).catch(() => undefined);
+  return Boolean(answer?.ok);
+}
+
+/**
+ * `reuse` attaches to an instance left standing by `E2E_KEEP=1` instead of
+ * building another one — sixty seconds is quick for a suite and slow for
+ * looking at a form twenty times in a row.
+ */
+export async function up({ quiet = false, reuse = false } = {}) {
   const say = (line) => !quiet && console.log(`  ${line}`);
+
+  if (reuse && (await isUp())) {
+    say("reusing the instance already standing");
+    await installCard();
+    return { baseUrl: BASE_URL, tokens: await login(), configDir: undefined, reused: true };
+  }
 
   await down();
   await docker(["network", "create", NETWORK]);

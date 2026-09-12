@@ -29,6 +29,11 @@ Download `scribe-card.js` from the [latest release](https://github.com/jonathan-
 
 Add a card, search for **Scribe Card**, and fill in the form: the query, the chart type, the unit, the axes. Home Assistant's own selectors, with the card drawn beside them as you type.
 
+![The card beside its editor: three tabs, Query, Chart and Time & data, with collapsible sections](https://raw.githubusercontent.com/jonathan-gtd/scribe-card/master/docs/editor.png)
+
+The form is in three tabs — **Query**, **Chart**, **Time & data** — with the less common settings
+folded into sections you can open. Everything is still one flat YAML card underneath.
+
 **The editor knows your query.** Once it runs, the columns it returned become the choices for the axes — no retyping a name you just wrote in the SQL.
 
 Everything the form does is plain YAML, so _Show code editor_ gives the same card:
@@ -232,6 +237,10 @@ real `ha-form` in the editor, a real French instance, a real user store that out
 A stand-in only ever behaves the way whoever wrote it imagined; this is where that stops being
 enough. It expects Scribe checked out beside this repository (`SCRIBE_PATH`, default `../scribe`),
 takes about a minute, and leaves nothing behind — `E2E_KEEP=1` leaves it standing to look at.
+
+`npm run e2e:shot` photographs the card beside its editor in that instance, which is the only way
+to see `ha-form` at all. It reuses a standing instance when there is one, and writes
+`docs/editor.png`.
 
 Releases are built by CI from the tag, and the published file carries a [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations): `gh attestation verify scribe-card.js --repo jonathan-gtd/scribe-card`.
 

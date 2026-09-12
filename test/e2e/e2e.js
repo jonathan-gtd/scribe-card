@@ -159,6 +159,26 @@ await page.addInitScript(
   hassTokens(rig.tokens),
 );
 
+// A promise rejected with something that is not an Error reaches Playwright as
+// a bare "Object" and says nothing. Caught here instead, where its contents
+// can still be read.
+await page.addInitScript(() => {
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason;
+    let described;
+    try {
+      described =
+        reason instanceof Error
+          ? `${reason.message} | ${(reason.stack ?? "").split("\n")[1] ?? ""}`
+          : JSON.stringify(reason);
+    } catch {
+      described = String(reason);
+    }
+    // eslint-disable-next-line no-console
+    console.error(`unhandled rejection: ${described}`);
+  });
+});
+
 phase = "first load";
 await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
 await page.waitForFunction(() => document.querySelector("home-assistant")?.hass?.services, null, {
@@ -301,6 +321,100 @@ await check("the editor finds the columns of a query with a range in it", async 
   assert.equal(found.form, true, "the editor rendered no ha-form at all");
   assert.match(found.text, /Columns found: time, moyenne/, found.text.slice(0, 300));
   assert.doesNotMatch(found.text, /does not run yet/);
+});
+
+await check("the editor is in tabs, and each one shows its own fields", async () => {
+  const seen = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant").hass;
+    const editor = document.createElement("scribe-card-editor");
+    editor.hass = hass;
+    editor.setConfig({ type: "custom:scribe-card", sql: "SELECT 1 AS a, 2 AS b" });
+    document.body.append(editor);
+    await editor.updateComplete;
+
+    // `ha-form` renders into its own shadow root, and the selectors into
+    // theirs, so counting what is on screen means walking through them.
+    const deep = (root, selector) => {
+      const found = [];
+      const walk = (node) => {
+        found.push(...node.querySelectorAll(selector));
+        for (const element of node.querySelectorAll("*")) {
+          if (element.shadowRoot) walk(element.shadowRoot);
+        }
+      };
+      walk(root);
+      return found;
+    };
+    const labels = () => deep(editor.shadowRoot, "ha-selector, ha-expansion-panel").length;
+
+    const tabs = [...editor.shadowRoot.querySelectorAll(".tab")].map((tab) =>
+      tab.textContent.trim(),
+    );
+    const first = labels();
+    editor.shadowRoot.querySelectorAll(".tab")[1].click();
+    await editor.updateComplete;
+    // The nested forms of a grid render on their own schedule.
+    await new Promise((done) => setTimeout(done, 400));
+    const second = labels();
+    const current = editor.shadowRoot.querySelector(".tab.current")?.textContent.trim();
+
+    editor.remove();
+    return { tabs, first, second, current };
+  });
+
+  assert.deepEqual(seen.tabs, ["Query", "Chart", "Time & data"]);
+  assert.ok(seen.first > 0, "the first tab rendered no fields");
+  assert.ok(seen.second > 0, "the second tab rendered no fields");
+  assert.equal(seen.current, "Chart", "clicking a tab did not select it");
+});
+
+await check("a value set on one tab is not lost by visiting another", async () => {
+  // `ha-form` is only ever given the fields of the tab on screen, so the
+  // configuration it hands back has to carry the rest of them too.
+  const config = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant").hass;
+    const editor = document.createElement("scribe-card-editor");
+    editor.hass = hass;
+    editor.setConfig({ type: "custom:scribe-card", sql: "SELECT 1", title: "Before" });
+    document.body.append(editor);
+    await editor.updateComplete;
+
+    let last;
+    editor.addEventListener("config-changed", (event) => {
+      last = event.detail.config;
+    });
+
+    // Type into the title, on the first tab.
+    const form = editor.shadowRoot.querySelector("ha-form");
+    form.dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: { value: { ...editor._config, title: "After", unit: "°C" } },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await editor.updateComplete;
+
+    // Then go to another tab and change something there.
+    editor.shadowRoot.querySelectorAll(".tab")[2].click();
+    await editor.updateComplete;
+    editor.shadowRoot.querySelector("ha-form").dispatchEvent(
+      new CustomEvent("value-changed", {
+        detail: { value: { ...editor._config, zoom: true } },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    await editor.updateComplete;
+
+    editor.remove();
+    return last;
+  });
+
+  assert.equal(config.title, "After", "the title was lost on the way to another tab");
+  assert.equal(config.unit, "°C", "the unit was lost");
+  assert.equal(config.zoom, true, "the second tab's own change did not stick");
+  assert.equal(config.sql, "SELECT 1", "the query was lost");
 });
 
 await check("a card in a sections view asks for a height that fits it", async () => {

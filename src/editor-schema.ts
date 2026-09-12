@@ -25,8 +25,21 @@ function open(values: string[], multiple = true): Schema["selector"] {
 export interface Schema {
   name: string;
   type?: string;
+  /** `expandable` and `grid` nest their values under `name` unless told not
+   * to; the card's configuration is flat and stays that way. */
+  flatten?: boolean;
+  title?: string;
+  icon?: string;
   selector?: Record<string, unknown>;
   schema?: Schema[];
+}
+
+/** One tab of the editor: a name, and the fields under it. */
+export interface Tab {
+  id: string;
+  label: string;
+  icon: string;
+  schema: Schema[];
 }
 
 /** Options for a column picker: what the query returned, or free text. */
@@ -47,106 +60,146 @@ function column(name: string, columns: string[], multiple = false): Schema {
 }
 
 /**
- * The editor form.
+ * The form, in tabs.
+ *
+ * One list of twenty fields is a wall, and a grid of switches is worse than a
+ * wall: `ha-form` puts a label at the left of its column and the switch at the
+ * right, so two of them side by side read as "Zoom ——— [switch] Stacked ———
+ * [switch]" and nobody can tell which belongs to which. Switches therefore get
+ * a row to themselves, and everything else is grouped.
+ *
+ * Tabs are rendered by the editor; the sections inside them are
+ * `ha-expansion-panel`, which `ha-form` provides. `flatten: true` keeps the
+ * configuration flat, so none of this changes a line of anybody's YAML.
  *
  * `columns` are the columns the query came back with, once it has been run —
  * the editor offers them for the axes rather than asking someone to retype a
  * name they already wrote in the SQL.
  */
-export function editorSchema(columns: string[] = []): Schema[] {
+export function editorTabs(columns: string[] = []): Tab[] {
   return [
-    { name: "title", selector: { text: {} } },
-    { name: "sql", selector: { text: { multiline: true } } },
     {
-      name: "",
-      type: "grid",
+      id: "query",
+      label: "Query",
+      icon: "mdi:database-search",
+      schema: [
+        { name: "title", selector: { text: {} } },
+        { name: "sql", selector: { text: { multiline: true } } },
+        {
+          name: "columns",
+          type: "expandable",
+          flatten: true,
+          title: "Columns",
+          icon: "mdi:table-column",
+          schema: [column("x", columns), column("y", columns, true)],
+        },
+      ],
+    },
+    {
+      id: "chart",
+      label: "Chart",
+      icon: "mdi:chart-line",
       schema: [
         {
-          name: "chart",
-          selector: {
-            select: {
-              mode: "dropdown",
-              options: [
-                { value: "line", label: "Line" },
-                { value: "area", label: "Area" },
-                { value: "bar", label: "Bar" },
-                { value: "scatter", label: "Scatter" },
-              ],
+          name: "",
+          type: "grid",
+          schema: [
+            {
+              name: "chart",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "line", label: "Line" },
+                    { value: "area", label: "Area" },
+                    { value: "bar", label: "Bar" },
+                    { value: "scatter", label: "Scatter" },
+                  ],
+                },
+              },
             },
-          },
+            { name: "unit", selector: { text: {} } },
+            {
+              name: "height",
+              selector: {
+                number: { min: 100, max: 1000, step: 10, mode: "box", unit_of_measurement: "px" },
+              },
+            },
+            {
+              name: "legend",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "auto", label: "When there are several" },
+                    { value: "always", label: "Always" },
+                    { value: "never", label: "Never" },
+                  ],
+                },
+              },
+            },
+          ],
         },
-        { name: "unit", selector: { text: {} } },
-        column("x", columns),
-        column("y", columns, true),
         {
-          name: "height",
-          selector: {
-            number: { min: 100, max: 1000, step: 10, mode: "box", unit_of_measurement: "px" },
-          },
+          name: "line",
+          type: "expandable",
+          flatten: true,
+          title: "How the series are drawn",
+          icon: "mdi:chart-bell-curve",
+          schema: [
+            {
+              name: "step",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "", label: "Off" },
+                    { value: "start", label: "Start" },
+                    { value: "middle", label: "Middle" },
+                    { value: "end", label: "End" },
+                  ],
+                },
+              },
+            },
+            // A switch to a row: see the note above this function.
+            { name: "fill", selector: { boolean: {} } },
+            { name: "smooth", selector: { boolean: {} } },
+            { name: "stacked", selector: { boolean: {} } },
+            { name: "colors", selector: open(PALETTE) },
+          ],
         },
+      ],
+    },
+    {
+      id: "time",
+      label: "Time & data",
+      icon: "mdi:clock-outline",
+      schema: [
+        { name: "ranges", selector: open(DEFAULT_RANGES) },
         {
           name: "refresh_interval",
           selector: {
             number: { min: 0, max: 86400, step: 30, mode: "box", unit_of_measurement: "s" },
           },
         },
-      ],
-    },
-    {
-      name: "",
-      type: "grid",
-      schema: [
         { name: "zoom", selector: { boolean: {} } },
-        { name: "stacked", selector: { boolean: {} } },
-        { name: "fill", selector: { boolean: {} } },
-        { name: "smooth", selector: { boolean: {} } },
-      ],
-    },
-    {
-      name: "",
-      type: "grid",
-      schema: [
         {
-          name: "step",
-          selector: {
-            select: {
-              mode: "dropdown",
-              options: [
-                { value: "", label: "Off" },
-                { value: "start", label: "Start" },
-                { value: "middle", label: "Middle" },
-                { value: "end", label: "End" },
-              ],
-            },
-          },
+          name: "remembering",
+          type: "expandable",
+          flatten: true,
+          title: "Remembering the chosen range",
+          icon: "mdi:content-save-outline",
+          schema: [{ name: "storage_key", selector: { text: {} } }],
         },
-        {
-          // Three answers, not two: the default is neither shown nor hidden.
-          name: "legend",
-          selector: {
-            select: {
-              mode: "dropdown",
-              options: [
-                { value: "auto", label: "When there are several" },
-                { value: "always", label: "Always" },
-                { value: "never", label: "Never" },
-              ],
-            },
-          },
-        },
-      ],
-    },
-    { name: "ranges", selector: open(DEFAULT_RANGES) },
-    { name: "colors", selector: open(PALETTE) },
-    {
-      name: "",
-      type: "grid",
-      schema: [
         { name: "export", selector: { boolean: {} } },
-        { name: "storage_key", selector: { text: {} } },
       ],
     },
   ];
+}
+
+/** Every field of every tab, which is what the card is configured by. */
+export function editorSchema(columns: string[] = []): Schema[] {
+  return editorTabs(columns).flatMap((tab) => tab.schema);
 }
 
 /** What each field is called in the form. */
