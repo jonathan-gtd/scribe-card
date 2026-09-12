@@ -41,17 +41,17 @@ The card draws the rows the query returns. It puts the first column that looks l
 
 ## Options
 
-| Option | Type | Default | What it does |
-| --- | --- | --- | --- |
-| `sql` | string | **required** | The query to run. |
-| `title` | string | — | Card header. |
-| `x` | string | the first time-looking column, else the first column | Column for the x axis. |
-| `y` | string or list | every numeric column besides `x` | Columns to draw. |
-| `chart` | `line`, `area`, `bar` | `line` | How to draw them. |
-| `unit` | string | — | Appended to the y axis labels. |
-| `height` | number | `250` | Chart height, in pixels. |
-| `refresh_interval` | number | `0` | Seconds between refreshes. `0` queries once, when the card loads. |
-| `colors` | list | a colour-blind-safe palette | Colours, in series order. |
+| Option             | Type                  | Default                                              | What it does                                                      |
+| ------------------ | --------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
+| `sql`              | string                | **required**                                         | The query to run.                                                 |
+| `title`            | string                | —                                                    | Card header.                                                      |
+| `x`                | string                | the first time-looking column, else the first column | Column for the x axis.                                            |
+| `y`                | string or list        | every numeric column besides `x`                     | Columns to draw.                                                  |
+| `chart`            | `line`, `area`, `bar` | `line`                                               | How to draw them.                                                 |
+| `unit`             | string                | —                                                    | Appended to the y axis labels.                                    |
+| `height`           | number                | `250`                                                | Chart height, in pixels.                                          |
+| `refresh_interval` | number                | `0`                                                  | Seconds between refreshes. `0` queries once, when the card loads. |
+| `colors`           | list                  | a colour-blind-safe palette                          | Colours, in series order.                                         |
 
 ## Examples
 

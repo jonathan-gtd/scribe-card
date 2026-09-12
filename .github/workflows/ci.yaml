@@ -32,6 +32,15 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: The committed bundle must match the sources
+        # dist/ is committed so HACS can install the card from the branch, not
+        # only from a release. A stale one would ship code nobody reviewed.
+        run: |
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::dist/ is out of date: run npm run build and commit it."
+            exit 1
+          fi
+
       - name: The built card must load as a module
         # A bundle that cannot be parsed is what a user would download.
         run: node --input-type=module -e "import('./dist/scribe-card.js').catch(e => { if (!/customElements|document|window/.test(String(e))) { throw e } })"
