@@ -24,6 +24,10 @@ export interface HomeAssistant {
   /** The services Home Assistant knows about, by domain. Without
    * `scribe.query` in it, the integration is missing or too old. */
   services?: Record<string, Record<string, unknown>>;
+  /** The websocket, which the card uses only to remember a chosen range. */
+  connection?: {
+    sendMessagePromise<T = unknown>(message: Record<string, unknown>): Promise<T>;
+  };
   /** The last argument asks for the service's response, which `scribe.query` returns. */
   callService(
     domain: string,
@@ -59,6 +63,14 @@ export interface ScribeCardConfig {
   stacked?: boolean;
   /** Fill under the line. `chart: area` is the same thing. */
   fill?: boolean;
+
+  /** Time ranges to offer, as `24h`, `7d`, `1y`. Needs `$__from`, `$__to` or
+   * `$__interval` in the query; the choice is remembered per user. */
+  ranges?: string[];
+  /** Pins what the remembered range is filed under. Defaults to the query. */
+  storage_key?: string;
+  /** Offer the rows as a CSV file. On by default wherever the toolbar shows. */
+  export?: boolean;
 
   /** Drag to zoom and a scrollbar under the chart. */
   zoom?: boolean;

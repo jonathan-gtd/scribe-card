@@ -15,6 +15,9 @@ import { chromium } from "playwright";
 
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
+/** Somewhere with an origin. Nothing is fetched from it but the page itself. */
+const ORIGIN = "https://scribe-card.test";
+
 /** The Chromium Playwright downloaded, whichever build is around. */
 function chromiumPath() {
   const base = resolve(process.env.HOME ?? "", ".cache/ms-playwright");
@@ -43,17 +46,25 @@ export async function openCard({ viewport = { width: 900, height: 760 } } = {}) 
   });
   page.on("pageerror", (error) => problems.push(String(error)));
 
-  await page.setContent(`<!doctype html>
+  // A real origin, not `about:blank`: the card remembers a chosen range in
+  // `localStorage`, and an opaque origin has none to remember it in — which is
+  // also why the card treats storage as something that can refuse.
+  const html = `<!doctype html>
 <html><head><meta charset="utf-8"><style>
   body { margin: 0; padding: 24px; background: #f4f5f7; font-family: Roboto, system-ui, sans-serif;
          --primary-text-color:#212121; --secondary-text-color:#727272; --divider-color:#e0e0e0;
          --primary-color:#03a9f4; --card-background-color:#fff; --ha-card-border-radius:12px; }
   .cards { display: grid; gap: 20px; }
 </style></head>
-<body><div class="cards"></div></body></html>`);
+<body><div class="cards"></div></body></html>`;
 
-  // The page is about:blank, which cannot import from file://; the bundle goes
-  // in as a module script instead, exactly as built.
+  await page.route(`${ORIGIN}/**`, (route) =>
+    route.fulfill({ status: 200, contentType: "text/html; charset=utf-8", body: html }),
+  );
+  await page.goto(ORIGIN);
+
+  // Nothing here is served from disk, so the bundle goes in as a module script
+  // instead, exactly as built.
   await page.addScriptTag({ content: bundle, type: "module" });
   await page.waitForFunction(() => customElements.get("scribe-card") !== undefined);
 

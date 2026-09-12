@@ -69,15 +69,45 @@ await page.evaluate(() => {
     row({ time: new Date(Date.UTC(2026, 8, 11, hour)).toISOString(), states: 1200 + hour * 30 }),
   );
 
+  window.__sql = [];
+  window.__sent = [];
+  window.__userData = {};
+
   window.__hass = (theme = "default", darkMode = false) => ({
     themes: { theme, darkMode },
     language: "en",
-    callService: async () => {
+    callService: async (domain, service, data) => {
       window.__calls++;
+      window.__sql.push(data?.sql);
       if (window.__fail) throw new Error('relation "states" does not exist');
       return { response: { result: window.__rows } };
     },
+    connection: {
+      sendMessagePromise: async (message) => {
+        window.__sent.push(message);
+        if (message.type === "frontend/get_user_data") {
+          return { value: window.__userData[message.key] };
+        }
+        window.__userData[message.key] = message.value;
+        return undefined;
+      },
+    },
   });
+
+  /** The picker, driven the way a person drives it. */
+  window.__open = async (card) => {
+    card.shadowRoot.querySelector(".trigger").click();
+    await card.updateComplete;
+  };
+  window.__choose = async (card, label) => {
+    const choice = [...card.shadowRoot.querySelectorAll(".choice")].find(
+      (button) => button.textContent.trim() === label,
+    );
+    choice.click();
+    await card.updateComplete;
+    await window.__settle();
+  };
+  window.__label = (card) => card.shadowRoot.querySelector(".trigger span")?.textContent.trim();
 
   window.__settle = (ms = 250) => new Promise((done) => setTimeout(done, ms));
 
@@ -331,6 +361,192 @@ await check("two cards asking the same question ask the database once", async ()
     return { before, after };
   });
   assert.equal(calls.after - calls.before, 1, "the same question went to the database twice");
+});
+
+const RANGED =
+  "SELECT time_bucket($__interval, time) AS time, count(*) AS states FROM s WHERE time > $__from";
+
+await check("a query with holes in it gets a picker, and one without does not", async () => {
+  const seen = await page.evaluate(async (sql) => {
+    const ranged = await window.__card({ sql, ranges: ["24h", "7d"] });
+    const plain = await window.__card({});
+    const seen = {
+      ranged: Boolean(ranged.shadowRoot.querySelector(".picker")),
+      label: window.__label(ranged),
+      plain: Boolean(plain.shadowRoot.querySelector(".toolbar")),
+      // Nothing to fill means nothing to pick, whatever `ranges` says.
+      ignored: Boolean(
+        (await window.__card({ ranges: ["24h"] })).shadowRoot.querySelector(".picker"),
+      ),
+    };
+    ranged.remove();
+    plain.remove();
+    return seen;
+  }, RANGED);
+
+  assert.equal(seen.ranged, true, "a query with markers got no picker");
+  assert.equal(seen.label, "Last 24 hours", "the first range is the one it opens on");
+  assert.equal(seen.plain, false, "a plain card grew a toolbar it has no use for");
+  assert.equal(seen.ignored, false, "ranges were offered for a query that cannot use them");
+});
+
+await check("choosing a range rewrites the query, and remembers the choice", async () => {
+  const seen = await page.evaluate(async (sql) => {
+    const card = await window.__card({ sql, ranges: ["24h", "7d"] });
+    const before = window.__sql.length;
+    await window.__open(card);
+    await window.__choose(card, "Last 7 days");
+    const asked = window.__sql.slice(before).at(-1);
+    const key = Object.keys(window.__userData)[0];
+    const seen = {
+      asked,
+      label: window.__label(card),
+      closed: !card.shadowRoot.querySelector(".menu"),
+      remembered: window.__userData[key],
+      local: JSON.parse(window.localStorage.getItem(key)),
+      key,
+    };
+    card.remove();
+    return seen;
+  }, RANGED);
+
+  assert.equal(seen.label, "Last 7 days");
+  assert.equal(seen.closed, true, "the menu stayed open over the chart");
+  assert.match(seen.asked, /time_bucket\('30 minutes', time\)/, "the bucket did not follow");
+  assert.match(seen.asked, /> '\d{4}-\d\d-\d\dT[\d:.]+Z'::timestamptz/);
+  assert.equal(seen.asked.includes("$__"), false, "a marker reached the database");
+  assert.deepEqual(seen.remembered, { last: "7d" }, "Home Assistant was not told");
+  assert.deepEqual(seen.local, { last: "7d" }, "the browser was not told");
+  assert.match(seen.key, /^scribe-card\./);
+});
+
+await check("a card opens on the range it was left on", async () => {
+  const label = await page.evaluate(async (sql) => {
+    // What the browser remembers is there before anything is asked, so the
+    // card must not flicker through its default first.
+    const card = await window.__card({ sql, ranges: ["24h", "7d"], storage_key: "kitchen" });
+    const first = window.__label(card);
+    card.remove();
+
+    window.localStorage.setItem("scribe-card.kitchen", JSON.stringify({ last: "7d" }));
+    const again = await window.__card({ sql, ranges: ["24h", "7d"], storage_key: "kitchen" });
+    const restored = window.__label(again);
+    again.remove();
+    window.localStorage.removeItem("scribe-card.kitchen");
+    return { first, restored };
+  }, RANGED);
+
+  assert.equal(label.first, "Last 24 hours");
+  assert.equal(label.restored, "Last 7 days", "the card forgot where it was left");
+});
+
+await check("what Home Assistant remembers reaches a browser that never knew", async () => {
+  const seen = await page.evaluate(async (sql) => {
+    // A second machine: the user store has a range, this browser has nothing.
+    window.__userData["scribe-card.bedroom"] = { last: "30d" };
+    window.localStorage.removeItem("scribe-card.bedroom");
+    const card = await window.__card({ sql, ranges: ["24h", "7d", "30d"], storage_key: "bedroom" });
+    await window.__settle(200);
+    const seen = { label: window.__label(card), asked: window.__sql.at(-1) };
+    card.remove();
+    delete window.__userData["scribe-card.bedroom"];
+    return seen;
+  }, RANGED);
+
+  assert.equal(seen.label, "Last 30 days", "the user store was not consulted");
+  assert.match(seen.asked, /time_bucket\('3 hours', time\)/, "the restored range was not queried");
+});
+
+await check("a range nobody should trust is not believed", async () => {
+  const label = await page.evaluate(async (sql) => {
+    window.localStorage.setItem("scribe-card.junk", JSON.stringify({ last: "everything" }));
+    const card = await window.__card({ sql, ranges: ["24h"], storage_key: "junk" });
+    const label = window.__label(card);
+    card.remove();
+    window.localStorage.removeItem("scribe-card.junk");
+    return label;
+  }, RANGED);
+
+  assert.equal(label, "Last 24 hours", "a stored range nobody validated was used");
+});
+
+await check("the menu is not clipped by the card it drops out of", async () => {
+  const overflow = await page.evaluate(async (sql) => {
+    const card = await window.__card({ sql, ranges: ["24h", "7d"], height: 120 });
+    const of = () => getComputedStyle(card.shadowRoot.querySelector("ha-card")).overflow;
+    const closed = of();
+    await window.__open(card);
+    const open = of();
+    card.remove();
+    return { closed, open };
+  }, RANGED);
+
+  // Hidden keeps the chart inside the card's rounded corners; a dropdown that
+  // is clipped by the thing it drops out of is no dropdown.
+  assert.equal(overflow.closed, "hidden");
+  assert.equal(overflow.open, "visible");
+});
+
+await check("a custom range is the two instants it was given", async () => {
+  const seen = await page.evaluate(async (sql) => {
+    const card = await window.__card({ sql, ranges: ["24h"], storage_key: "custom" });
+    await window.__open(card);
+    await window.__choose(card, "Custom…");
+
+    const at = (name) => card.shadowRoot.querySelector(`input[name="${name}"]`);
+    at("from").value = "2026-01-01T00:00";
+    at("to").value = "2026-01-08T00:00";
+    card.shadowRoot.querySelector(".apply").click();
+    await card.updateComplete;
+    await window.__settle();
+
+    const seen = {
+      label: window.__label(card),
+      asked: window.__sql.at(-1),
+      remembered: window.__userData["scribe-card.custom"],
+    };
+    card.remove();
+    window.localStorage.removeItem("scribe-card.custom");
+    return seen;
+  }, RANGED);
+
+  assert.match(seen.label, /—/, "the trigger still says 'Last 24 hours'");
+  // A week, whatever the machine's timezone: the bucket follows the span.
+  assert.match(seen.asked, /time_bucket\('30 minutes', time\)/);
+  assert.equal(seen.asked.includes("$__"), false);
+  assert.equal(typeof seen.remembered.from, "number", "an absolute range is two instants");
+  assert.equal(seen.remembered.to - seen.remembered.from, 7 * 86_400_000, "seven days");
+});
+
+await check("the rows come back as a CSV file", async () => {
+  const file = await page.evaluate(async () => {
+    const card = await window.__card({ title: "States per hour", export: true });
+    const make = URL.createObjectURL.bind(URL);
+    let blob;
+    URL.createObjectURL = (given) => {
+      blob = given;
+      return make(given);
+    };
+    const button = card.shadowRoot.querySelector("button.icon");
+    let name;
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      name = this.download;
+    };
+    button.click();
+    HTMLAnchorElement.prototype.click = click;
+    URL.createObjectURL = make;
+    const text = blob ? await blob.text() : "";
+    card.remove();
+    return { text, name, type: blob?.type };
+  });
+
+  const lines = file.text.split("\n");
+  assert.equal(lines[0], "time,states", "the header is the columns the query returned");
+  assert.equal(lines.length, 25, "24 rows and a header");
+  assert.match(lines[1], /^2026-09-11T00:00:00\.000Z,1200$/);
+  assert.equal(file.name, "states-per-hour.csv");
+  assert.match(file.type, /^text\/csv/);
 });
 
 await browser.close();

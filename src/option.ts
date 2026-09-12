@@ -19,6 +19,9 @@ const VALUE = "__value__";
 const NUMBER = "__number__";
 const TIME = "__time__";
 
+/** Points past which a chart is drawn differently, because it has to be. */
+const CROWDED = 2000;
+
 /** Readable on both themes, and distinguishable for the commonest colour blindness. */
 export const PALETTE = [
   "#0072b2",
@@ -62,7 +65,13 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
   const colours = config.colors ?? PALETTE;
   const colour = colours[index % colours.length];
   const type = config.chart === "bar" ? "bar" : config.chart === "scatter" ? "scatter" : "line";
-  const filled = config.fill ?? config.chart === "area";
+  // Stacked lines that are not filled read as a tangle: what is stacked is an
+  // area, whatever it is called.
+  const filled =
+    config.fill ?? (config.chart === "area" || (config.stacked === true && type === "line"));
+  // Past a few thousand points the canvas slows down and the drawing gains
+  // nothing: LTTB keeps the shape of a line with far fewer of them.
+  const crowded = chart.x.length > CROWDED;
 
   const base: Dict = {
     name: series.name,
@@ -83,8 +92,11 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
           lineStyle: { width: 2, color: colour },
           ...(filled ? { areaStyle: { color: colour, opacity: 0.18 } } : {}),
           ...(config.step ? { step: config.step } : {}),
+          ...(crowded ? { sampling: "lttb" } : {}),
         }
-      : {}),
+      : crowded
+        ? { large: true }
+        : {}),
     ...(config.stacked ? { stack: "total" } : {}),
   };
 

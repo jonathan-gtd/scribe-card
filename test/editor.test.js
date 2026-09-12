@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cleanConfig, editorSchema, HELPERS, LABELS } from "../.test/editor-schema.js";
+import { cleanConfig, editorSchema, formData, HELPERS, LABELS } from "../.test/editor-schema.js";
 
 function fields(schema) {
   return schema.flatMap((entry) => (entry.schema ? fields(entry.schema) : [entry]));
@@ -88,4 +88,61 @@ test("a single column is written as itself, not as a list of one", () => {
 
 test("the card type is always there, even from an empty form", () => {
   assert.equal(cleanConfig({}).type, "custom:scribe-card");
+});
+
+test("the form is given what a field can hold, and the config keeps what it means", () => {
+  // A legend has three answers — shown, hidden, and "when there are several" —
+  // and a configuration has two of them plus absent.
+  assert.equal(formData({}).legend, "auto");
+  assert.equal(formData({ legend: true }).legend, "always");
+  assert.equal(formData({ legend: false }).legend, "never");
+
+  assert.equal(cleanConfig({ sql: "…", legend: "auto" }).legend, undefined, "auto is absent");
+  assert.equal(cleanConfig({ sql: "…", legend: "always" }).legend, true);
+  assert.equal(cleanConfig({ sql: "…", legend: "never" }).legend, false);
+
+  // A single column is written as itself, and the field wants a list.
+  assert.deepEqual(formData({ y: "value" }).y, ["value"]);
+  assert.deepEqual(formData({ y: ["a", "b"] }).y, ["a", "b"]);
+  assert.equal("y" in formData({}), false);
+
+  // The CSV button is on by default, so the box has to be ticked to say so.
+  assert.equal(formData({}).export, true);
+  assert.equal(formData({ export: false }).export, false);
+  assert.equal(
+    cleanConfig({ sql: "…", export: true }).export,
+    undefined,
+    "a default is not written",
+  );
+  assert.equal(cleanConfig({ sql: "…", export: false }).export, false);
+});
+
+test("what goes through the form and back is what went in", () => {
+  const config = {
+    type: "custom:scribe-card",
+    sql: "SELECT time_bucket($__interval, time) AS time, avg(value) FROM states WHERE time > $__from",
+    title: "Temperature",
+    unit: "°C",
+    legend: false,
+    y: "avg",
+    ranges: ["24h", "7d"],
+    colors: ["#0072b2"],
+    storage_key: "kitchen",
+    step: "end",
+  };
+
+  assert.deepEqual(cleanConfig(formData(config)), config);
+});
+
+test("the ranges and the colours are offered, not imposed", () => {
+  const byName = Object.fromEntries(fields(editorSchema()).map((entry) => [entry.name, entry]));
+
+  for (const name of ["ranges", "colors"]) {
+    const select = byName[name].selector.select;
+    assert.equal(select.multiple, true, `${name} takes several`);
+    assert.equal(select.custom_value, true, `${name} takes one nobody listed`);
+    assert.ok(select.options.length > 1);
+  }
+  // "24h" is a range anyone would want, and "1 day" is not one at all.
+  assert.ok(byName.ranges.selector.select.options.some((option) => option.value === "24h"));
 });
