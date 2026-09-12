@@ -14,6 +14,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { cleanConfig, editorSchema, formData, HELPERS, LABELS, type Schema } from "./editor-schema";
 import { runQuery } from "./query";
+import { defaultRange, substitute } from "./range";
 import type { HomeAssistant, ScribeCardConfig } from "./types";
 
 /** Long enough that the columns are not looked up on every keystroke. */
@@ -52,9 +53,11 @@ export class ScribeCardEditor extends LitElement {
     if (!this.hass) return;
     this._lastSql = sql;
     try {
-      // The same call the preview beside this form makes, a moment earlier or
-      // later: `runQuery` hands both of them one answer.
-      const rows = await runQuery(this.hass, sql);
+      // Through the same filling-in the card does, or a query written with
+      // `$__from` in it never runs here and the columns never arrive — while
+      // the preview beside this form draws perfectly well.
+      const asked = substitute(sql, defaultRange(this._config.ranges), Date.now());
+      const rows = await runQuery(this.hass, asked);
       this._columns = rows.length ? Object.keys(rows[0]) : [];
       this._queryError = undefined;
     } catch (error: unknown) {
