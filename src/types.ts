@@ -20,21 +20,42 @@ export interface HomeAssistant {
 
 export interface ScribeCardConfig {
   type: string;
+
+  // --- What everybody needs ------------------------------------------------
+
   /** The query to run. Its rows are the chart. */
   sql: string;
   title?: string;
-  /** Column holding the x value. Defaults to the first column named `time`, or the first column. */
-  x?: string;
-  /** Columns to draw. Defaults to every numeric column that is not the x one. */
-  y?: string | string[];
-  /** `line` (default), `area` or `bar`. */
-  chart?: "line" | "area" | "bar";
+  /** `line` (default), `area`, `bar` or `scatter`. */
+  chart?: "line" | "area" | "bar" | "scatter";
   unit?: string;
   height?: number;
   /** Seconds between refreshes. 0, the default, only queries when the card loads. */
   refresh_interval?: number;
+  /** Column holding the x value. Defaults to the first column named `time`, or the first column. */
+  x?: string;
+  /** Columns to draw. Defaults to every numeric column that is not the x one. */
+  y?: string | string[];
   /** Colours, in series order. Defaults to a palette that reads in both themes. */
   colors?: string[];
+  legend?: boolean;
+  stacked?: boolean;
+  /** Fill under the line. `chart: area` is the same thing. */
+  fill?: boolean;
+
+  /** Drag to zoom and a scrollbar under the chart. */
+  zoom?: boolean;
+  /** Curve the line instead of joining the points straight. */
+  smooth?: boolean;
+  /** Draw as steps: `start`, `middle` or `end` — what a thermostat looks like. */
+  step?: "start" | "middle" | "end";
+
+  // --- ECharts, for whoever wants it ---------------------------------------
+
+  /** ECharts options, merged over what the card builds. */
+  options?: Record<string, unknown>;
+  /** ECharts series options, by column name. */
+  series?: Record<string, Record<string, unknown>>;
 }
 
 /** One row as `scribe.query` returns it. */

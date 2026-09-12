@@ -36,10 +36,14 @@ test("rows become a chart, in time order", () => {
   ];
   const chart = toChart(rows, "time", ["value"]);
 
-  assert.equal(chart.xIsTime, true);
+  assert.equal(chart.kind, "time");
   assert.deepEqual(chart.series[0].values, [21, 22], "the unordered query is sorted");
   assert.ok(chart.x[0] < chart.x[1]);
-  assert.equal(chart.x[0], Date.parse("2026-09-12T10:00:00Z") / 1000, "seconds, as uPlot wants");
+  assert.equal(
+    chart.x[0],
+    Date.parse("2026-09-12T10:00:00Z"),
+    "milliseconds, as ECharts' time axis wants",
+  );
 });
 
 test("a value that is not a number is a gap, not a zero", () => {
@@ -55,7 +59,7 @@ test("a value that is not a number is a gap, not a zero", () => {
   assert.deepEqual(chart.series[0].values, [21, null, null, 23.5]);
 });
 
-test("a row whose x value makes no sense is dropped", () => {
+test("a column that is not all dates is read as labels, not half a timeline", () => {
   const rows = [
     { time: "not a date", value: 1 },
     { time: "2026-09-12T10:00:00Z", value: 2 },
@@ -63,8 +67,11 @@ test("a row whose x value makes no sense is dropped", () => {
 
   const chart = toChart(rows, "time", ["value"]);
 
-  assert.equal(chart.x.length, 1);
-  assert.deepEqual(chart.series[0].values, [2]);
+  // Dropping the odd row would draw a timeline missing a point nobody
+  // mentioned; treating the column as labels shows exactly what came back.
+  assert.equal(chart.kind, "category");
+  assert.deepEqual(chart.x, ["not a date", "2026-09-12T10:00:00Z"]);
+  assert.deepEqual(chart.series[0].values, [1, 2]);
 });
 
 test("a numeric x axis is left alone", () => {
@@ -75,18 +82,26 @@ test("a numeric x axis is left alone", () => {
 
   const chart = toChart(rows, "hour", ["count"]);
 
-  assert.equal(chart.xIsTime, false, "an hour number is not a timestamp");
+  assert.equal(chart.kind, "number", "an hour number is not a timestamp");
   assert.deepEqual(chart.x, [1, 3]);
   assert.deepEqual(chart.series[0].values, [30, 10]);
 });
 
-test("epoch seconds and milliseconds both land on seconds", () => {
-  const seconds = toChart([{ t: 1789000000, v: 1 }], "t", ["v"]);
-  assert.equal(seconds.x[0], 1789000000);
+test("a date column lands on milliseconds, whatever it was written as", () => {
+  const iso = toChart([{ t: "2026-09-12T10:00:00Z", v: 1 }], "t", ["v"]);
+  assert.equal(iso.kind, "time");
+  assert.equal(iso.x[0], Date.parse("2026-09-12T10:00:00Z"));
 
-  // A query selecting extract(epoch …) * 1000, which is easy to write by mistake.
-  const millis = toChart([{ t: "2026-09-12T10:00:00Z", v: 1 }], "t", ["v"]);
-  assert.equal(millis.x[0], Date.parse("2026-09-12T10:00:00Z") / 1000);
+  // A plain number is a number: `SELECT extract(hour from time)` is an axis of
+  // hours, not of dates in 1970.
+  const hours = toChart([{ t: 14, v: 1 }], "t", ["v"]);
+  assert.equal(hours.kind, "number");
+  assert.equal(hours.x[0], 14);
+
+  // A number big enough to be an epoch is one, in seconds as Postgres gives it.
+  const epoch = toChart([{ t: 1789000000, v: 1 }], "t", ["v"]);
+  assert.equal(epoch.kind, "time");
+  assert.equal(epoch.x[0], 1789000000 * 1000);
 });
 
 test("several series keep their own values", () => {

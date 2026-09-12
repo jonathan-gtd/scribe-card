@@ -1,6 +1,6 @@
 # Scribe Card
 
-A Lovelace card that charts the result of a SQL query, through the [Scribe](https://github.com/jonathan-gtd/scribe) integration.
+A Lovelace card that charts the result of a SQL query, through the [Scribe](https://github.com/jonathan-gtd/scribe) integration. Drawn with [Apache ECharts](https://echarts.apache.org/) — the library Home Assistant's own history charts use.
 
 ![Two Scribe cards: daily minimum, average and maximum temperature over a month, and states recorded per hour](https://raw.githubusercontent.com/jonathan-gtd/scribe-card/master/docs/screenshot.png)
 
@@ -45,17 +45,50 @@ The card draws the rows the query returns. It puts the first column that looks l
 
 ## Options
 
-| Option             | Type                  | Default                                              | What it does                                                      |
-| ------------------ | --------------------- | ---------------------------------------------------- | ----------------------------------------------------------------- |
-| `sql`              | string                | **required**                                         | The query to run.                                                 |
-| `title`            | string                | —                                                    | Card header.                                                      |
-| `x`                | string                | the first time-looking column, else the first column | Column for the x axis.                                            |
-| `y`                | string or list        | every numeric column besides `x`                     | Columns to draw.                                                  |
-| `chart`            | `line`, `area`, `bar` | `line`                                               | How to draw them.                                                 |
-| `unit`             | string                | —                                                    | Appended to the y axis labels.                                    |
-| `height`           | number                | `250`                                                | Chart height, in pixels.                                          |
-| `refresh_interval` | number                | `0`                                                  | Seconds between refreshes. `0` queries once, when the card loads. |
-| `colors`           | list                  | a colour-blind-safe palette                          | Colours, in series order.                                         |
+| Option             | Type                             | Default                                       | What it does                                                      |
+| ------------------ | -------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
+| `sql`              | string                           | **required**                                  | The query to run.                                                 |
+| `title`            | string                           | —                                             | Card header.                                                      |
+| `chart`            | `line`, `area`, `bar`, `scatter` | `line`                                        | How to draw the series.                                           |
+| `x`                | string                           | the first time-looking column, else the first | Column for the x axis.                                            |
+| `y`                | string or list                   | every numeric column besides `x`              | Columns to draw.                                                  |
+| `unit`             | string                           | —                                             | Names the y axis, and follows the values in the tooltip.          |
+| `height`           | number                           | `250`                                         | Chart height, in pixels.                                          |
+| `refresh_interval` | number                           | `0`                                           | Seconds between refreshes. `0` queries once, when the card loads. |
+| `colors`           | list                             | a colour-blind-safe palette                   | Colours, in series order.                                         |
+| `legend`           | boolean                          | shown when there are several series           | Show the legend.                                                  |
+| `stacked`          | boolean                          | `false`                                       | Stack the series on top of each other.                            |
+| `fill`             | boolean                          | `false`                                       | Fill under the line — `chart: area` says the same.                |
+| `smooth`           | boolean                          | `false`                                       | Curve the line instead of joining the points straight.            |
+| `step`             | `start`, `middle`, `end`         | —                                             | Draw as steps, which is what a thermostat really does.            |
+| `zoom`             | boolean                          | `false`                                       | Drag to zoom, with a scrollbar under the chart.                   |
+| `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.            |
+| `series`           | object                           | —                                             | **ECharts series options**, by column name.                       |
+
+### Anything ECharts can do
+
+The card builds a plain ECharts option and merges `options:` and `series:` over it, so anything from the [ECharts documentation](https://echarts.apache.org/en/option.html) works here — the card never had to invent a name for what ECharts already has one for:
+
+```yaml
+type: custom:scribe-card
+title: Temperature and humidity
+sql: >
+  SELECT time_bucket('1 hour', time) AS time,
+         avg(value) FILTER (WHERE entity_id = 'sensor.temperature') AS temperature,
+         avg(value) FILTER (WHERE entity_id = 'sensor.humidity') AS humidity
+  FROM states
+  WHERE time > now() - interval '48 hours'
+  GROUP BY 1 ORDER BY 1
+zoom: true
+series:
+  humidity:
+    yAxisIndex: 1 # a second axis, in ECharts' own words
+    lineStyle: { type: dashed }
+options:
+  yAxis:
+    - { name: °C }
+    - { name: "%", position: right, splitLine: { show: false } }
+```
 
 ## Examples
 
@@ -118,6 +151,8 @@ sql: >
 The tables and views these queries use are described in [Scribe's data structure guide](https://github.com/jonathan-gtd/scribe/blob/master/docs/data-structure.md).
 
 ## Good to know
+
+- **The card weighs 612 KB** (208 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
 
 - **Give Scribe its own database user.** Every query runs as whatever user Scribe connects with. A read-only transaction stops writes, but a superuser can still read things that have nothing to do with your history. A user that owns only Scribe's database is the right answer, and it is what Scribe's setup guide recommends.
 - **Return what you need to draw, not everything you have.** A query without `GROUP BY` or `LIMIT` over a year of history can return millions of rows, and they all travel to your browser. `time_bucket(…)` exists for this.

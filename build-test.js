@@ -2,9 +2,9 @@
 import { build } from "esbuild";
 
 await build({
-  entryPoints: ["src/series.ts"],
+  entryPoints: ["src/series.ts", "src/option.ts"],
   bundle: true,
   format: "esm",
   target: "es2021",
-  outfile: ".test/series.js",
+  outdir: ".test",
 });
