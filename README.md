@@ -158,7 +158,14 @@ The tables and views these queries use are described in [Scribe's data structure
 
 ## Good to know
 
-- **The card weighs 612 KB** (208 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+- **The card weighs 621 KB** (210 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+
+- **Dates and numbers follow your dashboard.** The language, the number format and the twelve- or
+  twenty-four-hour clock come from Home Assistant's own settings, so the axis reads the way the
+  rest of your dashboard does.
+
+- **The card sizes itself in a sections view**, and the chart carries a text description and the
+  query's rows for a screen reader — a canvas says nothing on its own.
 
 - **Give Scribe its own database user.** Every query runs as whatever user Scribe connects with. A read-only transaction stops writes, but a superuser can still read things that have nothing to do with your history. A user that owns only Scribe's database is the right answer, and it is what Scribe's setup guide recommends.
 - **Return what you need to draw, not everything you have.** A query without `GROUP BY` or `LIMIT` over a year of history can return millions of rows, and they all travel to your browser. `time_bucket(…)` exists for this.
@@ -168,10 +175,16 @@ The tables and views these queries use are described in [Scribe's data structure
 
 ```
 npm install
-npm test          # the row-to-series rules
+npm test          # the row-to-series rules, the option, the editor, the locale
 npm run typecheck
 npm run build     # dist/scribe-card.js, what HACS installs
+npm run smoke     # the built card's behaviour, in a real browser
+npm run screenshot
 ```
+
+`npm test` needs no browser. `npm run smoke` drives the built bundle in Chromium for what a test
+without one cannot see: a refresh that fails keeping the chart it had, a card moved across a
+dashboard, a theme switched, a hidden tab, a sections view asking how tall the card is.
 
 Releases are built by CI from the tag, and the published file carries a [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations): `gh attestation verify scribe-card.js --repo jonathan-gtd/scribe-card`.
 
