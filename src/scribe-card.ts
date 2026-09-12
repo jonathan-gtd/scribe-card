@@ -23,6 +23,7 @@ import { CanvasRenderer } from "echarts/renderers";
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+import "./editor";
 import { buildOption, resolveFormatters, type Theme } from "./option";
 import { pickXColumn, pickYColumns, toChart, type Chart } from "./series";
 import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
@@ -55,6 +56,11 @@ export class ScribeCard extends LitElement {
   private _resize?: ResizeObserver;
   private _timer?: number;
   private _queried = false;
+
+  /** The visual editor Lovelace opens for this card. */
+  public static getConfigElement(): HTMLElement {
+    return document.createElement("scribe-card-editor");
+  }
 
   public static getStubConfig(): ScribeCardConfig {
     return {

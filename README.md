@@ -27,7 +27,11 @@ Download `scribe-card.js` from the [latest release](https://github.com/jonathan-
 
 ## Usage
 
-Add a **Manual** card and write:
+Add a card, search for **Scribe Card**, and fill in the form: the query, the chart type, the unit, the axes. Home Assistant's own selectors, with the card drawn beside them as you type.
+
+**The editor knows your query.** Once it runs, the columns it returned become the choices for the axes — no retyping a name you just wrote in the SQL.
+
+Everything the form does is plain YAML, so _Show code editor_ gives the same card:
 
 ```yaml
 type: custom:scribe-card
@@ -44,6 +48,8 @@ unit: °C
 The card draws the rows the query returns. It puts the first column that looks like time on the x axis, and every numeric column beside it becomes a line.
 
 ## Options
+
+The form covers these; `options:` and `series:` are for the code editor.
 
 | Option             | Type                             | Default                                       | What it does                                                      |
 | ------------------ | -------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
