@@ -19,6 +19,11 @@ const VALUE = "__value__";
 const NUMBER = "__number__";
 const TIME = "__time__";
 
+/** A marker, with what the formatter it stands for will need. */
+function mark(kind: string, settings: Record<string, unknown>): string {
+  return kind + JSON.stringify(settings);
+}
+
 /** Points past which a chart is drawn differently, because it has to be. */
 const CROWDED = 2000;
 
@@ -43,6 +48,17 @@ export interface Theme {
 
 type Dict = Record<string, unknown>;
 
+/** One name or several, which is how every column option is written. */
+export function toList(value: string | string[] | undefined): string[] {
+  if (value === undefined) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+/** A number the configuration gave, or nothing — `0` is a number. */
+function orNothing(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 /** Merge `over` into `base`, the way a user expects options to be overridden. */
 export function merge<T extends Dict>(base: T, over: Dict | undefined): T {
   if (!over) return base;
@@ -61,6 +77,17 @@ export function merge<T extends Dict>(base: T, over: Dict | undefined): T {
   return result as T;
 }
 
+/** Room around the chart. The slider under a zoomable chart needs its own. */
+function margins(config: ScribeCardConfig, zoomed: boolean): Dict {
+  return {
+    left: config.margin_left ?? 8,
+    right: config.margin_right ?? 12,
+    top: config.margin_top ?? 12,
+    bottom: config.margin_bottom ?? (zoomed ? 28 : 8),
+    containLabel: true,
+  };
+}
+
 function seriesOption(series: Series, index: number, chart: Chart, config: ScribeCardConfig): Dict {
   const colours = config.colors ?? PALETTE;
   const colour = colours[index % colours.length];
@@ -76,6 +103,19 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
   const base: Dict = {
     name: series.name,
     type,
+    // A column named on the right-hand axis is drawn against it, and carries
+    // that axis's unit into the tooltip: one unit for both would be a lie.
+    ...(toList(config.y2).includes(series.name)
+      ? {
+          yAxisIndex: 1,
+          tooltip: {
+            valueFormatter: mark(VALUE, {
+              unit: config.y2_unit ?? config.unit ?? "",
+              decimals: config.decimals,
+            }),
+          },
+        }
+      : {}),
     // A time or number axis wants pairs; a category axis reads them in order.
     data:
       chart.kind === "category"
@@ -107,30 +147,60 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
 export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme): Dict {
   const unit = config.unit ?? "";
   const axisLine = { lineStyle: { color: theme.grid } };
-  const splitLine = { lineStyle: { color: theme.grid, type: "dashed" } };
+  const splitLine = {
+    show: config.split_lines ?? true,
+    lineStyle: { color: theme.grid, type: "dashed" },
+  };
 
   const xAxis: Dict = {
     type: chart.kind === "time" ? "time" : chart.kind === "number" ? "value" : "category",
     ...(chart.kind === "category" ? { data: chart.x } : {}),
+    ...(config.x_name
+      ? { name: config.x_name, nameTextStyle: { color: theme.secondaryText } }
+      : {}),
     axisLine,
     axisLabel: {
       color: theme.secondaryText,
       hideOverlap: true,
       ...(chart.kind === "time" ? { formatter: TIME } : {}),
+      // Long entity names on a bar chart overlap until they are turned.
+      ...(orNothing(config.x_rotate) !== undefined ? { rotate: config.x_rotate } : {}),
     },
     splitLine: { show: false },
+  };
+
+  /** One value axis, left or right. They differ only in where they sit. */
+  const valueAxis = (side: "left" | "right"): Dict => {
+    const right = side === "right";
+    const name = right ? (config.y2_name ?? config.y2_unit) : (config.y_name ?? unit);
+    return {
+      type: (right ? config.y2_log : config.y_log) ? "log" : "value",
+      ...(right ? { position: "right" } : {}),
+      name: name || undefined,
+      nameTextStyle: { color: theme.secondaryText },
+      min: orNothing(right ? config.y2_min : config.y_min),
+      max: orNothing(right ? config.y2_max : config.y_max),
+      axisLine: { show: false },
+      axisLabel: {
+        color: theme.secondaryText,
+        formatter: mark(NUMBER, { decimals: config.decimals }),
+      },
+      // Two sets of horizontal lines at different heights is a mess; only the
+      // left axis draws them.
+      splitLine: right ? { show: false } : splitLine,
+    };
   };
 
   const option: Dict = {
     // The card draws its own header, and a chart title would sit under it.
     backgroundColor: "transparent",
     animation: false,
-    grid: { left: 8, right: 12, top: 12, bottom: 8, containLabel: true },
+    grid: margins(config, false),
     tooltip: {
       // Everything at that instant, which is what a history chart is read for.
       trigger: chart.kind === "category" ? "item" : "axis",
       axisPointer: { type: "line", lineStyle: { color: theme.secondaryText } },
-      valueFormatter: `${VALUE}${unit}`,
+      valueFormatter: mark(VALUE, { unit, decimals: config.decimals }),
     },
     legend: {
       show: config.legend ?? chart.series.length > 1,
@@ -141,14 +211,8 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
       textStyle: { color: theme.secondaryText },
     },
     xAxis,
-    yAxis: {
-      type: "value",
-      name: unit || undefined,
-      nameTextStyle: { color: theme.secondaryText },
-      axisLine: { show: false },
-      axisLabel: { color: theme.secondaryText, formatter: NUMBER },
-      splitLine,
-    },
+    // A second axis only exists when something is drawn against it.
+    yAxis: toList(config.y2).length ? [valueAxis("left"), valueAxis("right")] : valueAxis("left"),
     series: chart.series.map((series, index) => seriesOption(series, index, chart, config)),
     ...(config.zoom
       ? {
@@ -157,7 +221,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
             { type: "inside", throttle: 50 },
             { type: "slider", height: 18, bottom: 0, borderColor: theme.grid },
           ],
-          grid: { left: 8, right: 12, top: 12, bottom: 28, containLabel: true },
+          grid: margins(config, true),
         }
       : {}),
   };
@@ -172,29 +236,62 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
  * data — comparable in a test, and mergeable — and the card turns the marks
  * into what ECharts calls: the dashboard's own way of writing numbers, and its
  * own clock on the time axis.
+ *
+ * The whole option is walked rather than a list of places being visited, so a
+ * mark put anywhere — on a series of its own, on an axis a configuration
+ * added — is found.
  */
 export function resolveFormatters(option: Dict, locale?: HassLocale): Dict {
   const number = numberFormatter(locale);
+  const levels = timeLevels(usesAmPm(locale));
 
-  const tooltip = option.tooltip as Dict | undefined;
-  const marked = tooltip?.valueFormatter;
-  if (typeof marked === "string" && marked.startsWith(VALUE)) {
-    const unit = marked.slice(VALUE.length);
-    tooltip!.valueFormatter = (value: unknown) =>
-      value === null || value === undefined ? "—" : `${number(value)}${unit ? ` ${unit}` : ""}`;
-  }
+  /** What a mark stands for, or nothing if the string is not one. */
+  const resolve = (value: string): unknown => {
+    if (value === TIME || value.startsWith(TIME)) return levels;
 
-  // `options:` can replace an axis with a list of them, and a user who did that
-  // owns its labels; only the marks this file left are swapped.
-  const axes = [option.xAxis, option.yAxis].flatMap((axis) =>
-    Array.isArray(axis) ? axis : [axis],
-  );
-  for (const axis of axes) {
-    const label = (axis as Dict | undefined)?.axisLabel as Dict | undefined;
-    if (label?.formatter === NUMBER) label.formatter = (value: unknown) => number(value);
-    // ECharts' leveled time labels: an object, not a function.
-    if (label?.formatter === TIME) label.formatter = timeLevels(usesAmPm(locale));
-  }
+    const kind = value.startsWith(VALUE) ? VALUE : value.startsWith(NUMBER) ? NUMBER : undefined;
+    if (!kind) return undefined;
 
+    let settings: { unit?: string; decimals?: number } = {};
+    try {
+      settings = JSON.parse(value.slice(kind.length) || "{}");
+    } catch {
+      // A mark nobody wrote; leave the string alone below.
+      return undefined;
+    }
+
+    const write = (raw: unknown) => {
+      if (raw === null || raw === undefined) return "—";
+      const count = settings.decimals;
+      const rounded =
+        typeof count === "number" && Number.isFinite(Number(raw))
+          ? Number(Number(raw).toFixed(count))
+          : raw;
+      return number(rounded);
+    };
+
+    if (kind === NUMBER) return (raw: unknown) => write(raw);
+    const unit = settings.unit ?? "";
+    return (raw: unknown) =>
+      raw === null || raw === undefined ? "—" : `${write(raw)}${unit ? ` ${unit}` : ""}`;
+  };
+
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const entry of node) walk(entry);
+      return;
+    }
+    if (!node || typeof node !== "object") return;
+    for (const [key, value] of Object.entries(node as Dict)) {
+      if (typeof value === "string") {
+        const resolved = resolve(value);
+        if (resolved !== undefined) (node as Dict)[key] = resolved;
+      } else {
+        walk(value);
+      }
+    }
+  };
+
+  walk(option);
   return option;
 }

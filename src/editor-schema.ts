@@ -42,6 +42,16 @@ export interface Tab {
   schema: Schema[];
 }
 
+/** A number nobody has to type units into. */
+function number(name: string, unit?: string): Schema {
+  return {
+    name,
+    selector: {
+      number: { mode: "box", step: "any", ...(unit ? { unit_of_measurement: unit } : {}) },
+    },
+  };
+}
+
 /** Options for a column picker: what the query returned, or free text. */
 function column(name: string, columns: string[], multiple = false): Schema {
   return columns.length
@@ -171,6 +181,91 @@ export function editorTabs(columns: string[] = []): Tab[] {
       ],
     },
     {
+      id: "axes",
+      label: "Axes",
+      icon: "mdi:axis-arrow",
+      schema: [
+        {
+          name: "left",
+          type: "expandable",
+          flatten: true,
+          title: "Left axis",
+          icon: "mdi:format-vertical-align-center",
+          schema: [
+            { name: "y_name", selector: { text: {} } },
+            { name: "", type: "grid", schema: [number("y_min"), number("y_max")] },
+            number("decimals"),
+            { name: "y_log", selector: { boolean: {} } },
+          ],
+        },
+        {
+          name: "right",
+          type: "expandable",
+          flatten: true,
+          title: "Right axis",
+          icon: "mdi:arrow-split-vertical",
+          schema: [
+            column("y2", columns, true),
+            {
+              name: "",
+              type: "grid",
+              schema: [
+                { name: "y2_name", selector: { text: {} } },
+                { name: "y2_unit", selector: { text: {} } },
+              ],
+            },
+            { name: "", type: "grid", schema: [number("y2_min"), number("y2_max")] },
+            { name: "y2_log", selector: { boolean: {} } },
+          ],
+        },
+        {
+          name: "bottom",
+          type: "expandable",
+          flatten: true,
+          title: "X axis",
+          icon: "mdi:format-horizontal-align-center",
+          schema: [
+            {
+              name: "x_type",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "auto", label: "From the rows" },
+                    { value: "time", label: "Times" },
+                    { value: "number", label: "Numbers" },
+                    { value: "category", label: "Labels" },
+                  ],
+                },
+              },
+            },
+            { name: "x_name", selector: { text: {} } },
+            number("x_rotate", "°"),
+          ],
+        },
+        {
+          name: "around",
+          type: "expandable",
+          flatten: true,
+          title: "Around the chart",
+          icon: "mdi:border-all-variant",
+          schema: [
+            { name: "split_lines", selector: { boolean: {} } },
+            {
+              name: "",
+              type: "grid",
+              schema: [
+                number("margin_left", "px"),
+                number("margin_right", "px"),
+                number("margin_top", "px"),
+                number("margin_bottom", "px"),
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    {
       id: "time",
       label: "Time & data",
       icon: "mdi:clock-outline",
@@ -222,6 +317,25 @@ export const LABELS: Record<string, string> = {
   colors: "Colours",
   export: "Offer a CSV",
   storage_key: "Remember under",
+  y_name: "Name",
+  y_min: "Minimum",
+  y_max: "Maximum",
+  y_log: "Logarithmic",
+  decimals: "Decimals",
+  y2: "Columns on the right",
+  y2_name: "Name",
+  y2_unit: "Unit",
+  y2_min: "Minimum",
+  y2_max: "Maximum",
+  y2_log: "Logarithmic",
+  x_type: "What it holds",
+  x_name: "Name",
+  x_rotate: "Turn the labels",
+  split_lines: "Lines across the chart",
+  margin_left: "Left",
+  margin_right: "Right",
+  margin_top: "Top",
+  margin_bottom: "Bottom",
 };
 
 /** A line of help under the fields that need one. */
@@ -234,6 +348,13 @@ export const HELPERS: Record<string, string> = {
   ranges: "Needs $__from, $__to or $__interval in the query. The choice is remembered.",
   colors: "In series order. Left empty, a palette that reads in both themes.",
   storage_key: "Left empty, the chosen range is filed under the query itself.",
+  y2: "Drawn against their own axis, on the right. For a second unit in the same chart.",
+  y_min: "Left empty, the axis fits the values.",
+  decimals: "On the axis and in the tooltip. Left empty, as many as the value has.",
+  y_log: "For values that span orders of magnitude.",
+  x_type: "Left as it is, the rows decide. Change it when they decide wrong.",
+  x_rotate: "For long labels that would otherwise overlap.",
+  margin_left: "Room for the axis labels, in pixels.",
 };
 
 /**
@@ -253,6 +374,10 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
     fill: false,
     smooth: false,
     export: true,
+    split_lines: true,
+    y_log: false,
+    y2_log: false,
+    x_type: "auto",
   };
 
   const config: Record<string, unknown> = {};
@@ -267,7 +392,8 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
     }
     if (key in DEFAULTS && value === DEFAULTS[key]) continue;
     // A single column reads better than a list of one.
-    config[key] = key === "y" && Array.isArray(value) && value.length === 1 ? value[0] : value;
+    const single = (key === "y" || key === "y2") && Array.isArray(value) && value.length === 1;
+    config[key] = single ? (value as unknown[])[0] : value;
   }
   config.type = data.type ?? "custom:scribe-card";
   return config as unknown as ScribeCardConfig;
@@ -282,11 +408,16 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
  * itself where the field expects a list of them.
  */
 export function formData(config: Partial<ScribeCardConfig>): Record<string, unknown> {
-  const { legend, y, ...rest } = config;
+  const { legend, y, y2, ...rest } = config;
+  const asList = (value: string | string[] | undefined) =>
+    value === undefined ? {} : { list: Array.isArray(value) ? value : [value] };
   return {
     ...rest,
-    ...(y === undefined ? {} : { y: Array.isArray(y) ? y : [y] }),
+    ...("list" in asList(y) ? { y: asList(y).list } : {}),
+    ...("list" in asList(y2) ? { y2: asList(y2).list } : {}),
     legend: legend === undefined ? "auto" : legend ? "always" : "never",
+    // Two more whose default is not what an unticked box means.
     export: config.export ?? true,
+    split_lines: config.split_lines ?? true,
   };
 }

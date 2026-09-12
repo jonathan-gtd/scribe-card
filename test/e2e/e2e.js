@@ -62,6 +62,21 @@ const DASHBOARD = {
           title: "Broken",
           sql: "SELECT * FROM a_table_that_is_not_there",
         },
+        {
+          type: "custom:scribe-card",
+          title: "Two axes",
+          unit: "°C",
+          height: 200,
+          y2: "releves",
+          y2_unit: "n",
+          y_name: "Degrés",
+          y_min: 0,
+          decimals: 1,
+          sql: `SELECT time_bucket('1 hour', time) AS time, avg(value) AS moyenne,
+                       count(*) AS releves
+                FROM states WHERE entity_id = 'sensor.e2e_temperature'
+                  AND time > now() - interval '48 hours' GROUP BY 1 ORDER BY 1`,
+        },
       ],
     },
     {
@@ -323,6 +338,27 @@ await check("the editor finds the columns of a query with a range in it", async 
   assert.doesNotMatch(found.text, /does not run yet/);
 });
 
+await check("two units in one chart get an axis each", async () => {
+  const drawn = await card(page, 3).evaluate((element) => {
+    const option = element._chart.getOption();
+    return {
+      axes: option.yAxis.length,
+      right: option.yAxis[1]?.position,
+      names: option.yAxis.map((axis) => axis.name),
+      min: option.yAxis[0]?.min,
+      onRight: option.series.filter((one) => one.yAxisIndex === 1).map((one) => one.name),
+      lines: option.yAxis.map((axis) => axis.splitLine?.show),
+    };
+  });
+
+  assert.equal(drawn.axes, 2, "a second unit did not get a second axis");
+  assert.equal(drawn.right, "right");
+  assert.deepEqual(drawn.names, ["Degrés", "n"], "each axis is named for what it holds");
+  assert.deepEqual(drawn.onRight, ["releves"], "the wrong series went to the right");
+  assert.equal(drawn.min, 0, "an axis told to start at zero did not");
+  assert.deepEqual(drawn.lines, [true, false], "both axes drew their own lines across");
+});
+
 await check("the editor is in tabs, and each one shows its own fields", async () => {
   const seen = await page.evaluate(async () => {
     const hass = document.querySelector("home-assistant").hass;
@@ -362,7 +398,7 @@ await check("the editor is in tabs, and each one shows its own fields", async ()
     return { tabs, first, second, current };
   });
 
-  assert.deepEqual(seen.tabs, ["Query", "Chart", "Time & data"]);
+  assert.deepEqual(seen.tabs, ["Query", "Chart", "Axes", "Time & data"]);
   assert.ok(seen.first > 0, "the first tab rendered no fields");
   assert.ok(seen.second > 0, "the second tab rendered no fields");
   assert.equal(seen.current, "Chart", "clicking a tab did not select it");
