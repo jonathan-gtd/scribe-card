@@ -1,0 +1,6 @@
+{
+  "name": "Scribe Card",
+  "filename": "scribe-card.js",
+  "render_readme": true,
+  "homeassistant": "2026.3.0"
+}
