@@ -68,8 +68,44 @@ The form covers these; `options:` and `series:` are for the code editor.
 | `smooth`           | boolean                          | `false`                                       | Curve the line instead of joining the points straight.            |
 | `step`             | `start`, `middle`, `end`         | —                                             | Draw as steps, which is what a thermostat really does.            |
 | `zoom`             | boolean                          | `false`                                       | Drag to zoom, with a scrollbar under the chart.                   |
+| `ranges`           | list                             | seven, from `1h` to `1y`                      | Time ranges to offer. Needs `$__from`, `$__to` or `$__interval`.  |
+| `storage_key`      | string                           | the query itself                              | What the chosen range is remembered under.                        |
+| `export`           | boolean                          | `true`                                        | Offer the rows as a CSV file, wherever the toolbar shows.         |
 | `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.            |
 | `series`           | object                           | —                                             | **ECharts series options**, by column name.                       |
+
+### One card, several time ranges
+
+A query with a period written into it shows that period and no other, so the same chart over a day
+and over a month means two cards — with two `time_bucket()` calls, because a bucket of one minute
+over thirty days is forty-three thousand points.
+
+Leave the period out instead, and the card fills it in:
+
+| Marker        | Becomes                                                        |
+| ------------- | -------------------------------------------------------------- |
+| `$__from`     | the start of the chosen range, as a `timestamptz`              |
+| `$__to`       | its end                                                        |
+| `$__interval` | a bucket width that keeps the range under a few hundred points |
+
+```yaml
+type: custom:scribe-card
+title: States recorded
+ranges: [1h, 6h, 24h, 7d, 30d]
+sql: >
+  SELECT time_bucket($__interval, time) AS time, count(*) AS states
+  FROM states_raw
+  WHERE time >= $__from AND time < $__to
+  GROUP BY 1 ORDER BY 1
+```
+
+A picker appears at the top of the card, with the ranges above and **Custom…** for two exact
+instants. **The choice is remembered** — per user, on your Home Assistant, so it survives the
+browser closing, Home Assistant restarting, and reading the dashboard from another machine.
+
+Both ends are written as fixed instants rather than `now()`, so every mention of them in one query
+agrees with the others. Only a duration the card recognises — digits and one of `m h d w y` — ever
+reaches the SQL.
 
 ### Anything ECharts can do
 
@@ -158,7 +194,10 @@ The tables and views these queries use are described in [Scribe's data structure
 
 ## Good to know
 
-- **The card weighs 621 KB** (210 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+- **The card weighs 632 KB** (214 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+
+- **A crowded chart is drawn differently.** Past a few thousand points a line is downsampled with
+  LTTB, which keeps the shape of the curve and not the cost of drawing every point of it.
 
 - **Dates and numbers follow your dashboard.** The language, the number format and the twelve- or
   twenty-four-hour clock come from Home Assistant's own settings, so the axis reads the way the
