@@ -10,6 +10,7 @@ import { test } from "node:test";
 
 import {
   bucketFor,
+  defaultRange,
   hasMarkers,
   isRange,
   labelFor,
@@ -147,4 +148,20 @@ test("the picker says what it is showing", () => {
   );
   assert.match(label, /—/, "two instants are shown as a span");
   assert.match(label, /01\/01\/2026/);
+});
+
+test("a query can be read before anyone has chosen a range", () => {
+  // The editor runs the query only to learn its columns, and a query full of
+  // markers does not run until they are filled in.
+  assert.deepEqual(defaultRange(["7d", "30d"]), { last: "7d" }, "the first the card offers");
+  assert.deepEqual(defaultRange([]), { last: "24h" });
+  assert.deepEqual(defaultRange(undefined), { last: "24h" });
+  // A list whose first entry is nonsense still yields something usable.
+  assert.deepEqual(defaultRange(["hier", "30d"]), { last: "30d" });
+  assert.deepEqual(defaultRange(["hier"]), { last: "24h" });
+
+  const sql = "SELECT time_bucket($__interval, time) FROM s WHERE time > $__from";
+  const asked = substitute(sql, defaultRange(["7d"]), Date.parse("2026-09-12T12:00:00Z"));
+  assert.equal(asked.includes("$__"), false, "the editor would have asked with markers in it");
+  assert.match(asked, /'30 minutes'/);
 });

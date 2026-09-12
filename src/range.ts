@@ -122,6 +122,17 @@ export function substitute(sql: string, range: Range, now: number): string {
     .replaceAll("$__to", stamp(to));
 }
 
+/**
+ * A range to read a query with when nobody has chosen one yet.
+ *
+ * The editor runs the query only to learn its column names, and a query full
+ * of markers has to be filled in before it will run at all.
+ */
+export function defaultRange(ranges?: string[]): Range {
+  const first = ranges?.find((text) => parseDuration(text) !== null);
+  return { last: first ?? "24h" };
+}
+
 /** What the picker shows for a range. */
 export function labelFor(range: Range, locale?: HassLocale): string {
   if ("last" in range) {
