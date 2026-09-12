@@ -81,11 +81,18 @@ await page.evaluate(() => {
 
   window.__settle = (ms = 250) => new Promise((done) => setTimeout(done, ms));
 
-  window.__card = async (config = {}) => {
+  // A query of its own per card, so the shared cache cannot leak one check's
+  // answer into the next.
+  window.__n = 0;
+  window.__card = async (config = {}, hass) => {
     const card = document.createElement("scribe-card");
-    card.setConfig({ type: "custom:scribe-card", sql: "SELECT time, states FROM …", ...config });
+    card.setConfig({
+      type: "custom:scribe-card",
+      sql: `SELECT time, states FROM … /* ${++window.__n} */`,
+      ...config,
+    });
     document.querySelector(".cards").append(card);
-    card.hass = window.__hass();
+    card.hass = hass ?? window.__hass();
     await card.updateComplete;
     await window.__settle();
     return card;
@@ -251,6 +258,79 @@ await check("a configuration the card cannot draw is refused", async () => {
     assert.ok(message, `configuration ${index} was accepted`);
     assert.match(message, /^scribe-card: /);
   }
+});
+
+await check("a card without Scribe says so, rather than saying nothing", async () => {
+  const shown = await page.evaluate(async () => {
+    const hass = window.__hass();
+    // A frontend that knows every service, and not this one.
+    hass.services = { light: { turn_on: {} } };
+    const card = await window.__card({}, hass);
+    const shown = window.__shows(card);
+    card.remove();
+    return shown;
+  });
+  assert.equal(shown.error, true, "nothing was said at all");
+  assert.match(shown.text, /Scribe is not installed, or is older than 4\.0/);
+});
+
+await check("a sections view is told how tall the card is", async () => {
+  const grids = await page.evaluate(async () => {
+    const read = async (config) => {
+      const card = await window.__card(config);
+      const grid = card.getGridOptions();
+      card.remove();
+      return grid;
+    };
+    return {
+      titled: await read({ title: "States per hour", height: 250 }),
+      bare: await read({ height: 100 }),
+      tall: await read({ title: "Tall", height: 600 }),
+    };
+  });
+  assert.equal(grids.titled.columns, "full", "a chart is not read in half a section");
+  assert.equal(grids.titled.rows, 6, "250px under a header is six 56px rows");
+  assert.equal(grids.bare.rows, 2, "a short chart with no header is two");
+  assert.ok(grids.tall.rows > grids.titled.rows, "a taller card asks for more rows");
+  assert.ok(grids.titled.min_rows >= 1 && grids.titled.min_columns >= 1);
+});
+
+await check("the chart says what it shows, and the rows are there to read", async () => {
+  const seen = await page.evaluate(async () => {
+    const card = await window.__card({ title: "States recorded per hour" });
+    const chart = card.shadowRoot.querySelector(".chart");
+    const hidden = card.shadowRoot.querySelector(".sr-only");
+    const table = hidden?.querySelector("table");
+    const seen = {
+      role: chart.getAttribute("role"),
+      label: chart.getAttribute("aria-label"),
+      headers: table ? [...table.querySelectorAll("th")].map((th) => th.textContent.trim()) : null,
+      bodyRows: table ? table.querySelectorAll("tbody tr").length : 0,
+      caption: table?.querySelector("caption")?.textContent.trim(),
+      // Hidden from sight, not from a screen reader.
+      width: hidden ? hidden.getBoundingClientRect().width : 0,
+    };
+    card.remove();
+    return seen;
+  });
+  assert.equal(seen.role, "img");
+  assert.match(seen.label, /^States recorded per hour\. A line chart of states, over 24 points\.$/);
+  assert.deepEqual(seen.headers, ["time", "states"]);
+  assert.equal(seen.bodyRows, 24, "the rows behind the chart are not there to read");
+  assert.equal(seen.caption, "States recorded per hour");
+  assert.ok(seen.width <= 1, "the table is visible, which is not the idea");
+});
+
+await check("two cards asking the same question ask the database once", async () => {
+  const calls = await page.evaluate(async () => {
+    const sql = "SELECT time, states FROM … /* shared */";
+    const before = window.__calls;
+    const cards = await Promise.all([window.__card({ sql }), window.__card({ sql })]);
+    const after = window.__calls;
+    for (const card of cards) card.remove();
+    return { before, after };
+  });
+  assert.equal(calls.after - calls.before, 1, "the same question went to the database twice");
 });
 
 await browser.close();

@@ -13,7 +13,8 @@ import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import { cleanConfig, editorSchema, HELPERS, LABELS, type Schema } from "./editor-schema";
-import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
+import { runQuery } from "./query";
+import type { HomeAssistant, ScribeCardConfig } from "./types";
 
 /** Long enough that the columns are not looked up on every keystroke. */
 const SETTLE_MS = 900;
@@ -51,16 +52,10 @@ export class ScribeCardEditor extends LitElement {
     if (!this.hass) return;
     this._lastSql = sql;
     try {
-      const result = await this.hass.callService(
-        "scribe",
-        "query",
-        { sql },
-        undefined,
-        false,
-        true,
-      );
-      const rows = (result?.response as { result?: Row[] } | undefined)?.result;
-      this._columns = Array.isArray(rows) && rows.length ? Object.keys(rows[0]) : [];
+      // The same call the preview beside this form makes, a moment earlier or
+      // later: `runQuery` hands both of them one answer.
+      const rows = await runQuery(this.hass, sql);
+      this._columns = rows.length ? Object.keys(rows[0]) : [];
       this._queryError = undefined;
     } catch (error: unknown) {
       // Said once, here: the preview beside this form says it again in its own
