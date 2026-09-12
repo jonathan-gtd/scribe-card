@@ -11,7 +11,8 @@
     "format:check": "prettier --check .",
     "test": "node build-test.js && node --test test/*.test.js",
     "screenshot": "node scripts/screenshot.js",
-    "smoke": "node scripts/smoke.js"
+    "smoke": "node scripts/smoke.js",
+    "e2e": "node test/e2e/e2e.js"
   },
   "dependencies": {
     "echarts": "^6.1.0",

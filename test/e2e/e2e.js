@@ -1,0 +1,334 @@
+/** The card, in a real Home Assistant.
+ *
+ * What `scripts/smoke.js` cannot reach: a real `callService` and the shape it
+ * rejects with, a real `ha-form` in the editor, a real French instance, a real
+ * `frontend/set_user_data` surviving a reload. Every bug that got past the
+ * browser checks and reached a live dashboard was one of those.
+ *
+ *     npm run e2e            bring it up, check, tear it down
+ *     E2E_KEEP=1 npm run e2e leave it standing to look at
+ */
+
+import assert from "node:assert/strict";
+import { existsSync, readdirSync } from "node:fs";
+import { resolve } from "node:path";
+
+import { chromium } from "playwright";
+
+import { BASE_URL, cleanup, hassTokens, haLog, seed, sql, up } from "./rig.js";
+
+function chromiumPath() {
+  const base = resolve(process.env.HOME ?? "", ".cache/ms-playwright");
+  const builds = existsSync(base)
+    ? readdirSync(base)
+        .filter((name) => name.startsWith("chromium-"))
+        .map((name) => resolve(base, name, "chrome-linux64/chrome"))
+        .filter((path) => existsSync(path))
+    : [];
+  return builds.sort().at(-1);
+}
+
+const RANGED_SQL = `SELECT time_bucket($__interval, time) AS time, avg(value) AS moyenne
+FROM states WHERE entity_id = 'sensor.e2e_temperature'
+  AND time >= $__from AND time < $__to
+GROUP BY 1 ORDER BY 1`;
+
+/** The dashboard the checks are run against. */
+const DASHBOARD = {
+  views: [
+    {
+      title: "Cards",
+      cards: [
+        {
+          type: "custom:scribe-card",
+          title: "Plain",
+          unit: "°C",
+          height: 200,
+          sql: `SELECT time_bucket('1 hour', time) AS time, avg(value) AS moyenne
+                FROM states WHERE entity_id = 'sensor.e2e_temperature'
+                  AND time > now() - interval '24 hours' GROUP BY 1 ORDER BY 1`,
+        },
+        {
+          type: "custom:scribe-card",
+          title: "Ranged",
+          unit: "°C",
+          height: 200,
+          ranges: ["24h", "7d", "30d"],
+          storage_key: "e2e",
+          sql: RANGED_SQL,
+        },
+        {
+          type: "custom:scribe-card",
+          title: "Broken",
+          sql: "SELECT * FROM a_table_that_is_not_there",
+        },
+      ],
+    },
+    {
+      title: "Sections",
+      type: "sections",
+      sections: [
+        {
+          type: "grid",
+          cards: [
+            {
+              type: "custom:scribe-card",
+              title: "In a section",
+              height: 250,
+              sql: "SELECT time, value FROM states WHERE entity_id = 'sensor.e2e_temperature' LIMIT 50",
+            },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
+const checks = [];
+async function check(name, body) {
+  try {
+    await body();
+    checks.push([true, name]);
+  } catch (error) {
+    checks.push([false, name, error]);
+  }
+}
+
+/** The card at a position in the first view, as Playwright pierces shadow DOM. */
+const card = (page, index) => page.locator("scribe-card").nth(index);
+
+const DASHBOARD_URL = `${BASE_URL}/e2e-cards`;
+
+const rig = await up();
+console.log(`  ${await seed()} rows of history`);
+
+const browser = await chromium.launch({ executablePath: chromiumPath() });
+const page = await browser.newPage({ viewport: { width: 1100, height: 900 } });
+
+/**
+ * What the browser complained about once the card was on screen.
+ *
+ * Before that there is no card: its resource is not registered yet, so its
+ * code has not even been fetched, and a freshly onboarded Home Assistant
+ * complains about one or two things of its own on the way up. Those are kept
+ * apart and printed, so nothing is silently swallowed — but they are not this
+ * suite's to answer for.
+ */
+let phase = "start";
+const problems = [];
+const notOurs = [];
+const complaint = (text) => (phase === "checks" ? problems : notOurs).push(text);
+
+page.on("console", (message) => {
+  if (message.type() !== "error") return;
+  const text = message.text();
+  if (/favicon|manifest|Failed to load resource/.test(text)) return;
+  complaint(text);
+});
+/** Whatever the page threw, readable. A page can reject with anything, and
+ * `String()` on a plain object says "Object" — which is how the card came to
+ * show "[object Object]" on a live dashboard. */
+function describe(thrown) {
+  if (thrown instanceof Error) {
+    const where = (thrown.stack ?? "").split("\n").slice(0, 3).join(" | ");
+    return `${thrown.name}: ${thrown.message || "(no message)"} — ${where}`;
+  }
+  if (thrown && typeof thrown === "object") {
+    const { message, code } = thrown;
+    if (typeof message === "string" && message) return code ? `${code}: ${message}` : message;
+    try {
+      return JSON.stringify(thrown);
+    } catch {
+      // Nothing readable in it.
+    }
+  }
+  return String(thrown);
+}
+
+page.on("pageerror", (error) => complaint(`${describe(error)} [at ${page.url()}]`));
+
+await page.addInitScript(
+  (tokens) => localStorage.setItem("hassTokens", JSON.stringify(tokens)),
+  hassTokens(rig.tokens),
+);
+
+phase = "first load";
+await page.goto(BASE_URL, { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => document.querySelector("home-assistant")?.hass?.services, null, {
+  timeout: 60_000,
+});
+
+phase = "setup";
+// The card, and a dashboard to put it on — through the frontend's own
+// connection, which is the API Home Assistant actually offers. A dashboard of
+// its own, because the landing page is no longer a Lovelace one.
+await page.evaluate(async (config) => {
+  const hass = document.querySelector("home-assistant").hass;
+  await hass.callWS({
+    type: "lovelace/resources/create",
+    res_type: "module",
+    url: "/local/scribe-card.js?v=e2e",
+  });
+  await hass.callWS({
+    type: "lovelace/dashboards/create",
+    url_path: "e2e-cards",
+    title: "E2E",
+    mode: "storage",
+    show_in_sidebar: true,
+    require_admin: false,
+  });
+  await hass.callWS({ type: "lovelace/config/save", url_path: "e2e-cards", config });
+}, DASHBOARD);
+
+phase = "dashboard";
+// A resource is fetched when the page loads, so the card only exists after one.
+await page.goto(`${DASHBOARD_URL}/0`, { waitUntil: "domcontentloaded" });
+await page.waitForFunction(() => customElements.get("scribe-card") !== undefined, null, {
+  timeout: 30_000,
+});
+await page.locator("scribe-card").first().waitFor({ timeout: 30_000 });
+await page.waitForTimeout(1500);
+
+phase = "checks";
+await check("the card draws what the database returned", async () => {
+  const drawn = await card(page, 0).evaluate((element) => ({
+    canvas: Boolean(element.shadowRoot.querySelector(".chart canvas")),
+    label: element.shadowRoot.querySelector(".chart")?.getAttribute("aria-label"),
+    rows: element.shadowRoot.querySelectorAll("table tbody tr").length,
+  }));
+  assert.equal(drawn.canvas, true, "no chart was drawn");
+  assert.match(drawn.label, /A line chart of moyenne, over \d+ points/);
+  assert.ok(drawn.rows > 0, "the hidden table for a screen reader is empty");
+});
+
+await check("a query that fails says what the database said", async () => {
+  const shown = await card(page, 2).evaluate((element) => ({
+    error: Boolean(element.shadowRoot.querySelector(".error")),
+    text: element.shadowRoot.textContent.replace(/\s+/g, " ").trim(),
+  }));
+  assert.equal(shown.error, true, "a broken query drew no error at all");
+  // The bug that reached a live dashboard: Home Assistant rejects with
+  // {code, message}, and String() on that says "[object Object]".
+  assert.doesNotMatch(shown.text, /\[object Object\]/, "the card described the error object");
+  assert.match(shown.text, /a_table_that_is_not_there|does not exist/);
+});
+
+await check("the axis is written in the language the instance is in", async () => {
+  const locale = await page.evaluate(() => document.querySelector("home-assistant").hass.locale);
+  assert.equal(locale.language, "fr", "the rig did not onboard in French");
+
+  // ECharts draws to a canvas, so the proof is in the option it was given.
+  const labels = await card(page, 0).evaluate((element) => {
+    const option = element._chart.getOption();
+    const formatter = option.xAxis[0].axisLabel.formatter;
+    return {
+      hour: formatter.hour,
+      month: formatter.month,
+      y: typeof option.yAxis[0].axisLabel.formatter,
+    };
+  });
+  assert.equal(labels.hour, "{HH}:{mm}", "a French dashboard got a twelve-hour clock");
+  assert.equal(labels.y, "function", "numbers are not being formatted at all");
+});
+
+await check("a range can be chosen, and the query follows it", async () => {
+  const ranged = card(page, 1);
+  await ranged.locator(".trigger").click();
+  await page.waitForTimeout(200);
+  await ranged.locator(".choice", { hasText: "Last 30 days" }).click();
+  await page.waitForTimeout(2500);
+
+  const after = await ranged.evaluate((element) => ({
+    label: element.shadowRoot.querySelector(".trigger span")?.textContent.trim(),
+    points: element.shadowRoot.querySelector(".chart")?.getAttribute("aria-label"),
+    canvas: Boolean(element.shadowRoot.querySelector(".chart canvas")),
+  }));
+  assert.equal(after.label, "Last 30 days");
+  assert.equal(after.canvas, true, "the chart went away when the range changed");
+  assert.match(after.points, /over \d+ points/);
+});
+
+await check("the chosen range outlives a reload, from the user store", async () => {
+  // What the browser remembers is easy; this proves the server was told.
+  const stored = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant").hass;
+    const { value } = await hass.callWS({ type: "frontend/get_user_data", key: "scribe-card.e2e" });
+    return value;
+  });
+  assert.deepEqual(stored, { last: "30d" }, "Home Assistant was never told");
+
+  await page.evaluate(() => localStorage.removeItem("scribe-card.e2e"));
+  await page.goto(`${DASHBOARD_URL}/0`, { waitUntil: "domcontentloaded" });
+  await page.locator("scribe-card").first().waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(2500);
+
+  const label = await card(page, 1).evaluate((element) =>
+    element.shadowRoot.querySelector(".trigger span")?.textContent.trim(),
+  );
+  assert.equal(label, "Last 30 days", "the card forgot, with only the server to ask");
+});
+
+await check("the editor finds the columns of a query with a range in it", async () => {
+  const found = await page.evaluate(async (sqlText) => {
+    const hass = document.querySelector("home-assistant").hass;
+    const editor = document.createElement("scribe-card-editor");
+    editor.hass = hass;
+    editor.setConfig({ type: "custom:scribe-card", sql: sqlText, ranges: ["24h", "7d"] });
+    document.body.append(editor);
+    await editor.updateComplete;
+    // The editor waits for the typing to settle before it asks.
+    await new Promise((done) => setTimeout(done, 2500));
+    await editor.updateComplete;
+    const text = editor.shadowRoot.textContent.replace(/\s+/g, " ");
+    const form = Boolean(editor.shadowRoot.querySelector("ha-form"));
+    editor.remove();
+    return { text, form };
+  }, RANGED_SQL);
+
+  assert.equal(found.form, true, "the editor rendered no ha-form at all");
+  assert.match(found.text, /Columns found: time, moyenne/, found.text.slice(0, 300));
+  assert.doesNotMatch(found.text, /does not run yet/);
+});
+
+await check("a card in a sections view asks for a height that fits it", async () => {
+  await page.goto(`${DASHBOARD_URL}/1`, { waitUntil: "domcontentloaded" });
+  await page.locator("scribe-card").first().waitFor({ timeout: 30_000 });
+  await page.waitForTimeout(1500);
+
+  const box = await page.locator("scribe-card").first().boundingBox();
+  const chart = await page
+    .locator("scribe-card")
+    .first()
+    .evaluate(
+      (element) => element.shadowRoot.querySelector(".chart")?.getBoundingClientRect().height,
+    );
+  assert.ok(chart >= 240, `the chart is ${chart}px tall, not the 250 it asked for`);
+  assert.ok(box.height >= chart, "the card is shorter than the chart inside it");
+});
+
+if (problems.length) {
+  checks.push([false, "the browser complained", new Error(problems.join("\n    "))]);
+}
+
+for (const [ok, name, error] of checks) {
+  console.log(`${ok ? "ok" : "not ok"} — ${name}`);
+  if (!ok) console.error(`    ${error.message.split("\n").slice(0, 4).join("\n    ")}`);
+}
+
+if (notOurs.length) {
+  console.log(`\n(${notOurs.length} complaint(s) from before the card existed, not its doing)`);
+  for (const line of notOurs) console.log(`    ${line}`);
+}
+
+const failed = checks.filter(([ok]) => !ok).length;
+console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
+
+if (failed) console.error(`\n--- home assistant log ---\n${await haLog(20)}`);
+
+await browser.close();
+if (process.env.E2E_KEEP) {
+  console.log(`\nleft standing at ${BASE_URL} (e2e / e2e-password-1234)`);
+} else {
+  await cleanup(rig.configDir);
+}
+process.exit(failed ? 1 : 0);

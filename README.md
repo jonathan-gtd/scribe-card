@@ -221,9 +221,17 @@ npm run smoke     # the built card's behaviour, in a real browser
 npm run screenshot
 ```
 
-`npm test` needs no browser. `npm run smoke` drives the built bundle in Chromium for what a test
-without one cannot see: a refresh that fails keeping the chart it had, a card moved across a
-dashboard, a theme switched, a hidden tab, a sections view asking how tall the card is.
+`npm test` needs no browser. `npm run smoke` drives the built bundle in Chromium against a stand-in
+for Home Assistant, for what a test without a browser cannot see: a refresh that fails keeping the
+chart it had, a card moved across a dashboard, a theme switched, a hidden tab.
+
+`npm run e2e` goes further and needs Docker. It brings up a throwaway Home Assistant and a
+throwaway TimescaleDB, installs Scribe and the built card into them, onboards the instance over
+its own API and drives the real frontend — a real `callService` and the shape it rejects with, a
+real `ha-form` in the editor, a real French instance, a real user store that outlives a reload.
+A stand-in only ever behaves the way whoever wrote it imagined; this is where that stops being
+enough. It expects Scribe checked out beside this repository (`SCRIBE_PATH`, default `../scribe`),
+takes about a minute, and leaves nothing behind — `E2E_KEEP=1` leaves it standing to look at.
 
 Releases are built by CI from the tag, and the published file carries a [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations): `gh attestation verify scribe-card.js --repo jonathan-gtd/scribe-card`.
 
