@@ -28,7 +28,8 @@ import { buildOption, resolveFormatters, type Theme } from "./option";
 import { pickXColumn, pickYColumns, toChart, type Chart } from "./series";
 import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
 
-const VERSION = "0.2.0";
+/** Replaced at build time with the version in package.json, so it cannot drift. */
+declare const __VERSION__: string;
 
 // Only what the card draws: the whole of ECharts is several times this.
 echarts.use([
@@ -43,6 +44,12 @@ echarts.use([
   CanvasRenderer,
 ]);
 
+const CHART_TYPES = ["line", "area", "bar", "scatter"];
+const STEPS = ["start", "middle", "end"];
+
+/** A refresh faster than this is a mistake, and the database pays for it. */
+const MIN_REFRESH_SECONDS = 5;
+
 @customElement("scribe-card")
 export class ScribeCard extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
@@ -56,6 +63,10 @@ export class ScribeCard extends LitElement {
   private _resize?: ResizeObserver;
   private _timer?: number;
   private _queried = false;
+  /** The rows, turned into a chart. Rebuilt only when the rows or the config do. */
+  private _data?: { chart?: Chart; problem?: string };
+  /** The theme the chart was last painted for, so a theme change repaints it. */
+  private _drawnTheme?: string;
 
   /** The visual editor Lovelace opens for this card. */
   public static getConfigElement(): HTMLElement {
@@ -74,6 +85,28 @@ export class ScribeCard extends LitElement {
     if (!config?.sql || typeof config.sql !== "string") {
       throw new Error("scribe-card: `sql` is required");
     }
+    // Everything below is caught here rather than drawn wrong: Home Assistant
+    // turns a throw into a card that says what its configuration got wrong,
+    // which beats a chart that silently ignored the line you just typed.
+    if (config.chart !== undefined && !CHART_TYPES.includes(config.chart)) {
+      throw new Error(`scribe-card: \`chart\` must be one of ${CHART_TYPES.join(", ")}`);
+    }
+    if (config.step !== undefined && !STEPS.includes(config.step)) {
+      throw new Error(`scribe-card: \`step\` must be one of ${STEPS.join(", ")}`);
+    }
+    for (const key of ["height", "refresh_interval"] as const) {
+      const value = config[key];
+      if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
+        throw new Error(`scribe-card: \`${key}\` must be a number`);
+      }
+    }
+    if (config.y !== undefined && typeof config.y !== "string" && !Array.isArray(config.y)) {
+      throw new Error("scribe-card: `y` must be a column name or a list of them");
+    }
+    if (config.colors !== undefined && !Array.isArray(config.colors)) {
+      throw new Error("scribe-card: `colors` must be a list");
+    }
+
     this._config = config;
     this._queried = false;
     this._rows = undefined;
@@ -86,16 +119,38 @@ export class ScribeCard extends LitElement {
 
   public override connectedCallback(): void {
     super.connectedCallback();
+    document.addEventListener("visibilitychange", this._onVisibility);
     this._scheduleRefresh();
+    // Moving a card around a dashboard disconnects and reconnects the element.
+    // The chart was disposed on the way out, and no property changed to ask for
+    // a new one, so the card would come back as an empty frame.
+    if (this._rows) void this.updateComplete.then(() => this._draw());
   }
 
   public override disconnectedCallback(): void {
     super.disconnectedCallback();
+    document.removeEventListener("visibilitychange", this._onVisibility);
     this._stopRefresh();
     this._resize?.disconnect();
     this._resize = undefined;
     this._chart?.dispose();
     this._chart = undefined;
+  }
+
+  /**
+   * Home Assistant hands every card a new `hass` on every state change in the
+   * house. Nothing here depends on it — the rows come from a query — so those
+   * renders are skipped, and with them the whole row-to-series transform.
+   */
+  protected override shouldUpdate(changed: PropertyValues): boolean {
+    if (changed.size > 1 || !changed.has("hass")) return true;
+    const previous = changed.get("hass") as HomeAssistant | undefined;
+    // The first hass starts the query, and a theme change repaints the chart.
+    return !previous || !this._queried || this._themeSignature() !== this._drawnTheme;
+  }
+
+  protected override willUpdate(changed: PropertyValues): void {
+    if (changed.has("_rows") || changed.has("_config")) this._data = this._chartData();
   }
 
   protected override updated(changed: PropertyValues): void {
@@ -105,13 +160,31 @@ export class ScribeCard extends LitElement {
       void this._query();
       this._scheduleRefresh();
     }
-    if (changed.has("_rows") || changed.has("_config")) this._draw();
+    const themed = this._themeSignature() !== this._drawnTheme;
+    if (changed.has("_rows") || changed.has("_config") || themed) this._draw();
+  }
+
+  /** Hidden tabs do not need charts, and a wall tablet left on another tab
+   * should not run a query every thirty seconds for nobody. */
+  private _onVisibility = (): void => {
+    if (document.hidden) {
+      this._stopRefresh();
+      return;
+    }
+    if (!this._refreshSeconds()) return;
+    void this._query();
+    this._scheduleRefresh();
+  };
+
+  private _refreshSeconds(): number {
+    const seconds = this._config?.refresh_interval ?? 0;
+    return seconds > 0 ? Math.max(seconds, MIN_REFRESH_SECONDS) : 0;
   }
 
   private _scheduleRefresh(): void {
     this._stopRefresh();
-    const seconds = this._config?.refresh_interval ?? 0;
-    if (!seconds) return;
+    const seconds = this._refreshSeconds();
+    if (!seconds || document.hidden) return;
     this._timer = window.setInterval(() => void this._query(), seconds * 1000);
   }
 
@@ -138,8 +211,9 @@ export class ScribeCard extends LitElement {
       this._error = undefined;
     } catch (error: unknown) {
       // Scribe reports what the database said; showing it is the whole point.
+      // The rows that did load stay: a database that hiccuped once must not
+      // replace a month of history with a sentence.
       this._error = error instanceof Error ? error.message : String(error);
-      this._rows = undefined;
     } finally {
       this._loading = false;
     }
@@ -158,6 +232,13 @@ export class ScribeCard extends LitElement {
     return { chart: toChart(this._rows, x, y) };
   }
 
+  /** What the card was painted against: a custom theme changes the colours
+   * without touching `darkMode`, so both are part of the answer. */
+  private _themeSignature(): string {
+    const themes = this.hass?.themes;
+    return `${themes?.theme ?? ""}/${themes?.darkMode ?? false}`;
+  }
+
   /** The colours of the dashboard the card sits on. */
   private _theme(): Theme {
     const style = getComputedStyle(this);
@@ -172,8 +253,12 @@ export class ScribeCard extends LitElement {
   }
 
   private _draw(): void {
+    // Recorded even when nothing is drawn, so an error state does not ask to be
+    // repainted on every state change in the house.
+    this._drawnTheme = this._themeSignature();
+
     const container = this.renderRoot?.querySelector<HTMLDivElement>(".chart");
-    const data = this._chartData();
+    const data = this._data;
     if (!container || !data?.chart || !this._config) {
       this._chart?.dispose();
       this._chart = undefined;
@@ -196,28 +281,39 @@ export class ScribeCard extends LitElement {
 
   protected override render(): TemplateResult {
     if (!this._config) return html``;
-    const data = this._chartData();
-    const message = this._error ?? data?.problem;
+    const data = this._data;
+    // An error with rows behind it is stale data, not a dead card.
+    const stale = Boolean(this._error && this._rows);
+    const blocked = Boolean(this._error && !this._rows);
+    const hide = blocked || Boolean(data?.problem);
 
     return html`
       <ha-card .header=${this._config.title}>
         <div class="content">
           ${
-            this._error
+            blocked
               ? html`<div class="error">
                   <ha-icon icon="mdi:database-alert"></ha-icon>
                   <div><b>The query failed.</b><br />${this._error}</div>
                 </div>`
               : nothing
           }
-          ${!this._error && data?.problem ? html`<div class="empty">${data.problem}</div>` : nothing}
+          ${
+            stale
+              ? html`<div class="stale">
+                  <ha-icon icon="mdi:database-alert"></ha-icon>
+                  <div>The last refresh failed; these rows are older. ${this._error}</div>
+                </div>`
+              : nothing
+          }
+          ${!blocked && data?.problem ? html`<div class="empty">${data.problem}</div>` : nothing}
           ${
             !this._error && !this._rows && !this._loading
               ? html`<div class="empty">Waiting for Scribe…</div>`
               : nothing
           }
           <div
-            class="chart ${message ? "hidden" : ""}"
+            class="chart ${hide ? "hidden" : ""}"
             style=${`height:${this._config.height ?? 250}px`}
           ></div>
           ${this._loading ? html`<div class="loading"></div>` : nothing}
@@ -241,7 +337,8 @@ export class ScribeCard extends LitElement {
       display: none;
     }
     .error,
-    .empty {
+    .empty,
+    .stale {
       display: flex;
       gap: 12px;
       align-items: center;
@@ -251,6 +348,15 @@ export class ScribeCard extends LitElement {
     }
     .error {
       color: var(--error-color, #db4437);
+    }
+    .stale {
+      gap: 8px;
+      padding: 4px 8px 8px;
+      font-size: 12px;
+      color: var(--warning-color, #ffa600);
+    }
+    .stale ha-icon {
+      --mdc-icon-size: 16px;
     }
     .loading {
       position: absolute;
@@ -287,7 +393,7 @@ window.customCards.push({
 
 // eslint-disable-next-line no-console
 console.info(
-  `%c SCRIBE-CARD %c ${VERSION} `,
+  `%c SCRIBE-CARD %c ${__VERSION__} `,
   "background:#0072b2;color:#fff",
   "background:#333;color:#fff",
 );

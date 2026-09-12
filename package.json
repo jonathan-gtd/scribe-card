@@ -10,7 +10,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "node build-test.js && node --test test/*.test.js",
-    "screenshot": "node scripts/screenshot.js"
+    "screenshot": "node scripts/screenshot.js",
+    "smoke": "node scripts/smoke.js"
   },
   "dependencies": {
     "echarts": "^6.1.0",
