@@ -5,7 +5,9 @@
  */
 
 export interface HomeAssistant {
-  themes: { darkMode: boolean };
+  /** `theme` is the active theme's name: a custom theme repaints the card
+   * without `darkMode` ever changing. */
+  themes: { darkMode: boolean; theme?: string };
   language: string;
   /** The last argument asks for the service's response, which `scribe.query` returns. */
   callService(

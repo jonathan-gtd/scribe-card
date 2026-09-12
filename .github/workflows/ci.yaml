@@ -50,6 +50,11 @@ jobs:
         # A card that throws on load is what a user would have downloaded.
         run: npm run screenshot
 
+      - name: The card must behave, in a real browser
+        # What a screenshot cannot show: a failed refresh that keeps the chart,
+        # a card moved across a dashboard, a theme switched, a hidden tab.
+        run: npm run smoke
+
   hacs:
     name: HACS
     runs-on: ubuntu-latest

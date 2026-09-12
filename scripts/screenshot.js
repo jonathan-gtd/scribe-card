@@ -8,27 +8,10 @@
  *     npm run screenshot
  */
 
-import { existsSync, readdirSync } from "node:fs";
-import { mkdir, readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
 
-import { chromium } from "playwright";
-
-/** The Chromium Playwright downloaded, whichever build is around. */
-function chromiumPath() {
-  const base = resolve(process.env.HOME ?? "", ".cache/ms-playwright");
-  const builds = existsSync(base)
-    ? readdirSync(base)
-        .filter((name) => name.startsWith("chromium-"))
-        .map((name) => resolve(base, name, "chrome-linux64/chrome"))
-        .filter((path) => existsSync(path))
-    : [];
-  return builds.sort().at(-1);
-}
-
-const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const bundle = await readFile(resolve(root, "dist/scribe-card.js"), "utf8");
+import { openCard, root } from "./harness.js";
 
 /** A month of daily temperatures, and a day of Scribe's own throughput. */
 function sampleRows() {
@@ -59,50 +42,7 @@ function sampleRows() {
   return { temperature, throughput };
 }
 
-const page = await (
-  await chromium.launch({ executablePath: chromiumPath() })
-).newPage({ viewport: { width: 900, height: 760 } });
-/** Anything the browser complained about: the card must render silently. */
-const problems = [];
-page.on("console", (message) => {
-  if (message.type() === "error") problems.push(message.text());
-});
-page.on("pageerror", (error) => problems.push(String(error)));
-
-await page.setContent(`<!doctype html>
-<html><head><meta charset="utf-8"><style>
-  body { margin: 0; padding: 24px; background: #f4f5f7; font-family: Roboto, system-ui, sans-serif;
-         --primary-text-color:#212121; --secondary-text-color:#727272; --divider-color:#e0e0e0;
-         --primary-color:#03a9f4; --card-background-color:#fff; --ha-card-border-radius:12px; }
-  .cards { display: grid; gap: 20px; }
-</style></head>
-<body><div class="cards"></div></body></html>`);
-
-// The page is about:blank, which cannot import from file://; the bundle goes
-// in as a module script instead, exactly as built.
-await page.addScriptTag({ content: bundle, type: "module" });
-await page.waitForFunction(() => customElements.get("scribe-card") !== undefined);
-
-await page.evaluate(() => {
-  // The two Home Assistant elements the card renders into, reduced to what
-  // they look like: a card surface and an icon slot.
-  customElements.define(
-    "ha-card",
-    class extends HTMLElement {
-      connectedCallback() {
-        const header = this.getAttribute("header") ?? this.header;
-        this.attachShadow({ mode: "open" }).innerHTML = `<style>
-          :host { display:block; background:var(--card-background-color,#fff);
-                  border-radius:var(--ha-card-border-radius,12px);
-                  box-shadow:0 2px 2px rgba(0,0,0,.14),0 1px 5px rgba(0,0,0,.12); }
-          .header { font-size:20px; padding:14px 16px 4px; color:var(--primary-text-color); }
-        </style>${header ? `<div class="header">${header}</div>` : ""}<slot></slot>`;
-      }
-    },
-  );
-  customElements.define("ha-icon", class extends HTMLElement {});
-});
-
+const { browser, page, problems } = await openCard();
 const { temperature, throughput } = sampleRows();
 
 for (const [rows, config] of [
@@ -147,6 +87,8 @@ for (const [rows, config] of [
 await page.waitForTimeout(400);
 await mkdir(resolve(root, "docs"), { recursive: true });
 await page.locator(".cards").screenshot({ path: resolve(root, "docs/screenshot.png") });
+await browser.close();
+
 if (problems.length) {
   console.error(`The card did not render cleanly:\n  ${problems.join("\n  ")}`);
   process.exit(1);
