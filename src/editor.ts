@@ -12,7 +12,7 @@
 import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
-import { cleanConfig, editorSchema, formData, HELPERS, LABELS, type Schema } from "./editor-schema";
+import { cleanConfig, editorTabs, formData, HELPERS, LABELS, type Schema } from "./editor-schema";
 import { runQuery } from "./query";
 import { defaultRange, substitute } from "./range";
 import type { HomeAssistant, ScribeCardConfig } from "./types";
@@ -27,6 +27,7 @@ export class ScribeCardEditor extends LitElement {
   @state() private _config: Partial<ScribeCardConfig> = {};
   @state() private _columns: string[] = [];
   @state() private _queryError?: string;
+  @state() private _tab = "query";
 
   private _timer?: number;
   private _lastSql?: string;
@@ -88,35 +89,94 @@ export class ScribeCardEditor extends LitElement {
   protected override render(): TemplateResult {
     if (!this.hass) return html``;
 
+    const tabs = editorTabs(this._columns);
+    const current = tabs.find((tab) => tab.id === this._tab) ?? tabs[0];
+
     return html`
+      <div class="tabs" role="tablist">
+        ${tabs.map(
+          (tab) => html`
+            <button
+              class="tab ${tab.id === current.id ? "current" : ""}"
+              role="tab"
+              aria-selected=${tab.id === current.id ? "true" : "false"}
+              @click=${() => {
+                this._tab = tab.id;
+              }}
+            >
+              <ha-icon icon=${tab.icon}></ha-icon>
+              <span>${tab.label}</span>
+            </button>
+          `,
+        )}
+      </div>
+
       <ha-form
         .hass=${this.hass}
         .data=${formData(this._config)}
-        .schema=${editorSchema(this._columns)}
+        .schema=${current.schema}
         .computeLabel=${this._label}
         .computeHelper=${this._helper}
         @value-changed=${this._valueChanged}
       ></ha-form>
 
       ${
-        this._columns.length
+        // What the query returned belongs beside the fields that use it, and
+        // a problem with the query belongs wherever the query is written.
+        current.id === "query" && this._columns.length
           ? html`<p class="hint">Columns found: ${this._columns.join(", ")}</p>`
           : nothing
       }
       ${
-        this._queryError
+        current.id === "query" && this._queryError
           ? html`<p class="hint error">The query does not run yet: ${this._queryError}</p>`
           : nothing
       }
-      <p class="hint">
-        Anything else — a second axis, a log scale, a dashed line — goes in
-        <code>options:</code> and <code>series:</code>, in ECharts' own words. Switch to
-        <b>Show code editor</b> for those.
-      </p>
+      ${
+        current.id === tabs[tabs.length - 1].id
+          ? html`<p class="hint">
+              Anything else — a second axis, a log scale, a dashed line — goes in
+              <code>options:</code> and <code>series:</code>, in ECharts' own words. Switch to
+              <b>Show code editor</b> for those.
+            </p>`
+          : nothing
+      }
     `;
   }
 
   public static override styles = css`
+    .tabs {
+      display: flex;
+      gap: 2px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+      overflow-x: auto;
+    }
+    .tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex: 0 0 auto;
+      border: none;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      padding: 10px 14px;
+      background: none;
+      color: var(--secondary-text-color);
+      font: inherit;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .tab:hover {
+      background: var(--secondary-background-color, rgba(127, 127, 127, 0.1));
+    }
+    .tab.current {
+      color: var(--primary-color);
+      border-bottom-color: var(--primary-color);
+    }
+    .tab ha-icon {
+      --mdc-icon-size: 18px;
+    }
     .hint {
       margin: 12px 4px 0;
       color: var(--secondary-text-color);
