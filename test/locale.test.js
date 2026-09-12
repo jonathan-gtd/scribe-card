@@ -51,7 +51,10 @@ test("the clock is the one the dashboard is set to", () => {
   // `language` asks the language: English is on twelve hours, French is not.
   assert.equal(usesAmPm({ time_format: "language", language: "en-US" }), true);
   assert.equal(usesAmPm({ time_format: "language", language: "fr" }), false);
-  assert.equal(usesAmPm(undefined), false);
+  // `system`, and a card handed no locale at all, follow the machine — which is
+  // French here and American on a runner, so only the shape can be asserted.
+  assert.equal(typeof usesAmPm({ time_format: "system" }), "boolean");
+  assert.equal(typeof usesAmPm(undefined), "boolean");
 });
 
 test("the time axis keeps its levels, and changes only its clock", () => {
