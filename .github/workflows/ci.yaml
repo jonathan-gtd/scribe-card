@@ -55,6 +55,46 @@ jobs:
         # a card moved across a dashboard, a theme switched, a hidden tab.
         run: npm run smoke
 
+  e2e:
+    name: In a real Home Assistant
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: scribe-card
+
+      # The card is tested against the integration it talks to, so both are
+      # needed. Scribe is copied into the throwaway instance's config.
+      - uses: actions/checkout@v5
+        with:
+          repository: jonathan-gtd/scribe
+          path: scribe
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: scribe-card/package-lock.json
+
+      - name: Install
+        working-directory: scribe-card
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Build the card the instance will be given
+        working-directory: scribe-card
+        run: npm run build
+
+      - name: Check it in a real Home Assistant
+        working-directory: scribe-card
+        # Brings up a throwaway Home Assistant and TimescaleDB, installs Scribe
+        # and the built card, onboards over the API, and drives the real
+        # frontend. This is what catches what a fake `hass` cannot: the shape
+        # Home Assistant rejects a service call with, and `ha-form`.
+        # It prints Home Assistant's own log itself when something fails.
+        run: npm run e2e
+
   hacs:
     name: HACS
     runs-on: ubuntu-latest
