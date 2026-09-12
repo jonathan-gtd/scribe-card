@@ -79,6 +79,22 @@ The form covers these; `options:` and `series:` are for the code editor.
 | `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.            |
 | `series`           | object                           | —                                             | **ECharts series options**, by column name.                       |
 
+### Axes
+
+| Option                          | Type                                 | Default              | What it does                                         |
+| ------------------------------- | ------------------------------------ | -------------------- | ---------------------------------------------------- |
+| `y2`                            | string or list                       | —                    | Columns drawn against a second axis, on the right.   |
+| `y_name` / `y2_name`            | string                               | `unit` / `y2_unit`   | What each axis is called.                            |
+| `y_min` / `y_max`               | number                               | fits the values      | Where the left axis starts and stops.                |
+| `y2_min` / `y2_max` / `y2_unit` | number / number / string             | —                    | The same, for the right-hand axis.                   |
+| `y_log` / `y2_log`              | boolean                              | `false`              | A logarithmic axis.                                  |
+| `decimals`                      | number                               | as many as there are | On the axis labels and in the tooltip.               |
+| `x_type`                        | `auto`, `time`, `number`, `category` | `auto`               | What the x axis holds, when the rows are read wrong. |
+| `x_name`                        | string                               | —                    | What the x axis is called.                           |
+| `x_rotate`                      | number                               | —                    | Degrees to turn the x labels by, for long names.     |
+| `split_lines`                   | boolean                              | `true`               | Horizontal lines across the chart.                   |
+| `margin_left` … `margin_bottom` | number                               | `8`/`12`/`12`/`8`    | Room around the chart, in pixels.                    |
+
 ### One card, several time ranges
 
 A query with a period written into it shows that period and no other, so the same chart over a day
@@ -126,15 +142,13 @@ sql: >
   FROM states
   WHERE time > now() - interval '48 hours'
   GROUP BY 1 ORDER BY 1
+unit: °C
+y2: humidity # its own axis, on the right
+y2_unit: "%"
 zoom: true
 series:
   humidity:
-    yAxisIndex: 1 # a second axis, in ECharts' own words
-    lineStyle: { type: dashed }
-options:
-  yAxis:
-    - { name: °C }
-    - { name: "%", position: right, splitLine: { show: false } }
+    lineStyle: { type: dashed } # and anything else, in ECharts' own words
 ```
 
 ## Examples

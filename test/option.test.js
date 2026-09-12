@@ -182,3 +182,68 @@ test("merge replaces values and descends into objects", () => {
   assert.deepEqual(merge({ a: [1, 2, 3] }, { a: [9] }), { a: [9] });
   assert.deepEqual(merge({ a: 1 }, undefined), { a: 1 });
 });
+
+test("a second axis exists only when something is drawn against it", () => {
+  assert.equal(Array.isArray(option(TIME_ROWS).yAxis), false, "one axis, as before");
+
+  const built = option(TIME_ROWS, { y2: "maximum", unit: "°C", y2_unit: "%" });
+  assert.equal(built.yAxis.length, 2);
+  assert.equal(built.yAxis[1].position, "right");
+  assert.equal(built.series[0].yAxisIndex, undefined, "average stayed on the left");
+  assert.equal(built.series[1].yAxisIndex, 1, "maximum went to the right");
+
+  // Two sets of horizontal lines at different heights is a mess.
+  assert.equal(built.yAxis[1].splitLine.show, false);
+});
+
+test("each axis writes its own unit into the tooltip", () => {
+  const built = resolveFormatters(option(TIME_ROWS, { y2: "maximum", unit: "°C", y2_unit: "%" }), {
+    language: "en",
+  });
+
+  assert.equal(built.tooltip.valueFormatter(21.5), "21.5 °C", "the left axis's unit");
+  assert.equal(built.series[1].tooltip.valueFormatter(60), "60 %", "the right axis's own");
+});
+
+test("an axis can be told where to start, stop and how to step", () => {
+  const built = option(TIME_ROWS, { y_min: 0, y_max: 40, y_log: true, y_name: "Degrees" });
+
+  assert.equal(built.yAxis.min, 0, "zero is a minimum, not an absence of one");
+  assert.equal(built.yAxis.max, 40);
+  assert.equal(built.yAxis.type, "log");
+  assert.equal(built.yAxis.name, "Degrees", "the name wins over the unit");
+  // Left alone, the axis fits the values.
+  assert.equal(option(TIME_ROWS).yAxis.min, undefined);
+});
+
+test("decimals reach the axis and the tooltip", () => {
+  const built = resolveFormatters(option(TIME_ROWS, { unit: "°C", decimals: 1 }), {
+    language: "en",
+  });
+
+  assert.equal(built.tooltip.valueFormatter(21.4567), "21.5 °C");
+  assert.equal(built.yAxis.axisLabel.formatter(21.4567), "21.5");
+  // Without it, the value is written as it came.
+  const plain = resolveFormatters(option(TIME_ROWS), { language: "en" });
+  assert.equal(plain.yAxis.axisLabel.formatter(21.4567), "21.457");
+});
+
+test("the x axis can be named, turned, and its lines turned off", () => {
+  const built = option(TIME_ROWS, { x_name: "When", x_rotate: 45, split_lines: false });
+
+  assert.equal(built.xAxis.name, "When");
+  assert.equal(built.xAxis.axisLabel.rotate, 45);
+  assert.equal(built.yAxis.splitLine.show, false);
+  assert.equal(option(TIME_ROWS).yAxis.splitLine.show, true, "lines are drawn by default");
+});
+
+test("the room around the chart can be given away", () => {
+  const built = option(TIME_ROWS, { margin_left: 40, margin_bottom: 30 });
+
+  assert.equal(built.grid.left, 40);
+  assert.equal(built.grid.bottom, 30);
+  assert.equal(built.grid.right, 12, "what was not asked for is unchanged");
+  // A zoomable chart needs room for its slider, unless it was told otherwise.
+  assert.equal(option(TIME_ROWS, { zoom: true }).grid.bottom, 28);
+  assert.equal(option(TIME_ROWS, { zoom: true, margin_bottom: 60 }).grid.bottom, 60);
+});

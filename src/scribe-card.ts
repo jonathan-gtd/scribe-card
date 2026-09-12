@@ -58,6 +58,7 @@ echarts.use([
 
 const CHART_TYPES = ["line", "area", "bar", "scatter"];
 const STEPS = ["start", "middle", "end"];
+const X_TYPES = ["auto", "time", "number", "category"];
 
 /** A refresh faster than this is a mistake, and the database pays for it. */
 const MIN_REFRESH_SECONDS = 5;
@@ -144,7 +145,26 @@ export class ScribeCard extends LitElement {
     if (config.step !== undefined && !STEPS.includes(config.step)) {
       throw new Error(`scribe-card: \`step\` must be one of ${STEPS.join(", ")}`);
     }
-    for (const key of ["height", "refresh_interval"] as const) {
+    if (config.x_type !== undefined && !X_TYPES.includes(config.x_type)) {
+      throw new Error(`scribe-card: \`x_type\` must be one of ${X_TYPES.join(", ")}`);
+    }
+    if (config.y2 !== undefined && typeof config.y2 !== "string" && !Array.isArray(config.y2)) {
+      throw new Error("scribe-card: `y2` must be a column name or a list of them");
+    }
+    for (const key of [
+      "height",
+      "refresh_interval",
+      "decimals",
+      "x_rotate",
+      "y_min",
+      "y_max",
+      "y2_min",
+      "y2_max",
+      "margin_left",
+      "margin_right",
+      "margin_top",
+      "margin_bottom",
+    ] as const) {
       const value = config[key];
       if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
         throw new Error(`scribe-card: \`${key}\` must be a number`);
@@ -381,7 +401,10 @@ export class ScribeCard extends LitElement {
     if (y.length === 0) {
       return { problem: `No numeric column to draw. The query returned: ${columns.join(", ")}.` };
     }
-    return { chart: toChart(this._rows, x, y) };
+    const forced = this._config.x_type;
+    return {
+      chart: toChart(this._rows, x, y, forced && forced !== "auto" ? forced : undefined),
+    };
   }
 
   /** What the card was painted against: a custom theme changes the colours

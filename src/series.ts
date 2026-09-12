@@ -87,8 +87,14 @@ export function axisKind(rows: Row[], xColumn: string): AxisKind {
  * a query without ORDER BY is common; a category axis keeps the order the
  * query returned, which is usually an ORDER BY of its own.
  */
-export function toChart(rows: Row[], xColumn: string, yColumns: string[]): Chart {
-  const kind = axisKind(rows, xColumn);
+export function toChart(
+  rows: Row[],
+  xColumn: string,
+  yColumns: string[],
+  forced?: AxisKind,
+): Chart {
+  // Guessing is right almost always; `forced` is for the almost.
+  const kind = forced ?? axisKind(rows, xColumn);
 
   const x: (number | string)[] = [];
   const series: Series[] = yColumns.map((name) => ({ name, values: [] }));

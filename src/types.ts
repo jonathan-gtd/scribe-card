@@ -72,6 +72,38 @@ export interface ScribeCardConfig {
   /** Offer the rows as a CSV file. On by default wherever the toolbar shows. */
   export?: boolean;
 
+  // --- Axes ----------------------------------------------------------------
+
+  /** Columns to draw against a second axis, on the right. */
+  y2?: string | string[];
+  /** What the left axis is called. Defaults to `unit`. */
+  y_name?: string;
+  y_min?: number;
+  y_max?: number;
+  /** A logarithmic axis, for values that span orders of magnitude. */
+  y_log?: boolean;
+  /** The same, for the right-hand axis. */
+  y2_name?: string;
+  y2_unit?: string;
+  y2_min?: number;
+  y2_max?: number;
+  y2_log?: boolean;
+
+  /** Decimals on the axis labels and in the tooltip. */
+  decimals?: number;
+  /** What the x axis holds, when guessing from the rows gets it wrong. */
+  x_type?: "auto" | "time" | "number" | "category";
+  x_name?: string;
+  /** Degrees to turn the x labels by, for long names that overlap. */
+  x_rotate?: number;
+  /** Horizontal lines across the chart. On by default. */
+  split_lines?: boolean;
+  /** Room around the chart, in pixels. */
+  margin_left?: number;
+  margin_right?: number;
+  margin_top?: number;
+  margin_bottom?: number;
+
   /** Drag to zoom and a scrollbar under the chart. */
   zoom?: boolean;
   /** Curve the line instead of joining the points straight. */
