@@ -41,9 +41,14 @@ jobs:
             exit 1
           fi
 
-      - name: The built card must load as a module
-        # A bundle that cannot be parsed is what a user would download.
-        run: node --input-type=module -e "import('./dist/scribe-card.js').catch(e => { if (!/customElements|document|window/.test(String(e))) { throw e } })"
+      - name: Install a browser
+        run: npx playwright install --with-deps chromium
+
+      - name: The card must render, silently
+        # Renders the built bundle in a real browser with sample rows — the
+        # screenshot in the README — and fails on any console or page error.
+        # A card that throws on load is what a user would have downloaded.
+        run: npm run screenshot
 
   hacs:
     name: HACS

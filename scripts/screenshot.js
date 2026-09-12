@@ -62,9 +62,12 @@ function sampleRows() {
 const page = await (
   await chromium.launch({ executablePath: chromiumPath() })
 ).newPage({ viewport: { width: 900, height: 760 } });
+/** Anything the browser complained about: the card must render silently. */
+const problems = [];
 page.on("console", (message) => {
-  if (message.type() === "error") console.error("browser:", message.text());
+  if (message.type() === "error") problems.push(message.text());
 });
+page.on("pageerror", (error) => problems.push(String(error)));
 
 await page.setContent(`<!doctype html>
 <html><head><meta charset="utf-8"><style>
@@ -144,5 +147,10 @@ for (const [rows, config] of [
 await page.waitForTimeout(400);
 await mkdir(resolve(root, "docs"), { recursive: true });
 await page.locator(".cards").screenshot({ path: resolve(root, "docs/screenshot.png") });
+if (problems.length) {
+  console.error(`The card did not render cleanly:\n  ${problems.join("\n  ")}`);
+  process.exit(1);
+}
+
 console.log("docs/screenshot.png");
 process.exit(0);
