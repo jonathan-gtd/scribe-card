@@ -4,11 +4,26 @@
  * dependency that would have to keep up with the frontend on its own.
  */
 
+/** How the dashboard's owner writes dates and numbers. */
+export interface HassLocale {
+  language?: string;
+  /** `language`, `system`, `comma_decimal`, `decimal_comma`, `space_comma`,
+   * `quote_decimal` or `none`. */
+  number_format?: string;
+  /** `language`, `system`, `am_pm` or `twenty_four`. */
+  time_format?: string;
+}
+
 export interface HomeAssistant {
   /** `theme` is the active theme's name: a custom theme repaints the card
    * without `darkMode` ever changing. */
   themes: { darkMode: boolean; theme?: string };
   language: string;
+  /** Present on any recent frontend; `language` is the fallback. */
+  locale?: HassLocale;
+  /** The services Home Assistant knows about, by domain. Without
+   * `scribe.query` in it, the integration is missing or too old. */
+  services?: Record<string, Record<string, unknown>>;
   /** The last argument asks for the service's response, which `scribe.query` returns. */
   callService(
     domain: string,

@@ -24,7 +24,9 @@ import { LitElement, css, html, nothing, type PropertyValues, type TemplateResul
 import { customElement, property, state } from "lit/decorators.js";
 
 import "./editor";
+import { echartsLocale } from "./locale";
 import { buildOption, resolveFormatters, type Theme } from "./option";
+import { runQuery } from "./query";
 import { pickXColumn, pickYColumns, toChart, type Chart } from "./series";
 import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
 
@@ -50,6 +52,32 @@ const STEPS = ["start", "middle", "end"];
 /** A refresh faster than this is a mistake, and the database pays for it. */
 const MIN_REFRESH_SECONDS = 5;
 
+/** A sections row, and the gap between two of them. */
+const GRID_ROW = 56;
+const GRID_GAP = 8;
+
+/** More rows than this in a hidden table is a lot of DOM for a screen reader
+ * to walk; the label above it still says what the chart shows. */
+const TABLE_LIMIT = 200;
+
+/** ECharts keeps its locales by name; this card only ever needs the one Home
+ * Assistant is in, rebuilt whenever that changes. */
+const LOCALE_CODE = "HA";
+let registered: string | undefined;
+
+function useLocale(language: string): string {
+  if (registered !== language) {
+    // A partial locale is the supported path: ECharts merges anything missing
+    // over its English defaults, none of which this card draws.
+    echarts.registerLocale(
+      LOCALE_CODE,
+      echartsLocale(language) as Parameters<typeof echarts.registerLocale>[1],
+    );
+    registered = language;
+  }
+  return LOCALE_CODE;
+}
+
 @customElement("scribe-card")
 export class ScribeCard extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
@@ -67,6 +95,8 @@ export class ScribeCard extends LitElement {
   private _data?: { chart?: Chart; problem?: string };
   /** The theme the chart was last painted for, so a theme change repaints it. */
   private _drawnTheme?: string;
+  /** The language the chart was built in: ECharts takes it once, at init. */
+  private _chartLanguage?: string;
 
   /** The visual editor Lovelace opens for this card. */
   public static getConfigElement(): HTMLElement {
@@ -115,6 +145,19 @@ export class ScribeCard extends LitElement {
 
   public getCardSize(): number {
     return Math.ceil((this._config?.height ?? 250) / 50);
+  }
+
+  /** How much of a sections view the card asks for.
+   *
+   * `getCardSize` is the masonry layout's question; sections ask this one, and
+   * a card that does not answer is given a default that has nothing to do with
+   * the chart inside it. A row is 56 pixels with 8 between them, and the chart
+   * sits under the header with the content's padding around it. */
+  public getGridOptions(): Record<string, unknown> {
+    const chrome = (this._config?.title ? 44 : 0) + 20;
+    const pixels = (this._config?.height ?? 250) + chrome;
+    const rows = Math.max(1, Math.ceil((pixels + GRID_GAP) / (GRID_ROW + GRID_GAP)));
+    return { columns: "full", rows, min_columns: 6, min_rows: 2 };
   }
 
   public override connectedCallback(): void {
@@ -172,7 +215,7 @@ export class ScribeCard extends LitElement {
       return;
     }
     if (!this._refreshSeconds()) return;
-    void this._query();
+    void this._query(true);
     this._scheduleRefresh();
   };
 
@@ -185,7 +228,7 @@ export class ScribeCard extends LitElement {
     this._stopRefresh();
     const seconds = this._refreshSeconds();
     if (!seconds || document.hidden) return;
-    this._timer = window.setInterval(() => void this._query(), seconds * 1000);
+    this._timer = window.setInterval(() => void this._query(true), seconds * 1000);
   }
 
   private _stopRefresh(): void {
@@ -193,21 +236,12 @@ export class ScribeCard extends LitElement {
     this._timer = undefined;
   }
 
-  private async _query(): Promise<void> {
+  /** `fresh` is a refresh: it has to reach the database, which is the point. */
+  private async _query(fresh = false): Promise<void> {
     if (!this.hass || !this._config) return;
     this._loading = true;
     try {
-      const result = await this.hass.callService(
-        "scribe",
-        "query",
-        { sql: this._config.sql },
-        undefined,
-        false,
-        true,
-      );
-      const rows = (result?.response as { result?: Row[] } | undefined)?.result;
-      if (!Array.isArray(rows)) throw new Error("the query returned no rows array");
-      this._rows = rows;
+      this._rows = await runQuery(this.hass, this._config.sql, fresh);
       this._error = undefined;
     } catch (error: unknown) {
       // Scribe reports what the database said; showing it is the whole point.
@@ -233,10 +267,22 @@ export class ScribeCard extends LitElement {
   }
 
   /** What the card was painted against: a custom theme changes the colours
-   * without touching `darkMode`, so both are part of the answer. */
+   * without touching `darkMode`, so both are part of the answer, and so is the
+   * language, which decides what the axis says. */
   private _themeSignature(): string {
     const themes = this.hass?.themes;
-    return `${themes?.theme ?? ""}/${themes?.darkMode ?? false}`;
+    const locale = this.hass?.locale;
+    return [
+      themes?.theme ?? "",
+      themes?.darkMode ?? false,
+      this._language(),
+      locale?.number_format ?? "",
+      locale?.time_format ?? "",
+    ].join("/");
+  }
+
+  private _language(): string {
+    return this.hass?.locale?.language || this.hass?.language || "en";
   }
 
   /** The colours of the dashboard the card sits on. */
@@ -265,8 +311,20 @@ export class ScribeCard extends LitElement {
       return;
     }
 
+    // ECharts takes its locale when the instance is made, so a dashboard that
+    // changed language needs a new one.
+    const language = this._language();
+    if (this._chart && this._chartLanguage !== language) {
+      this._chart.dispose();
+      this._chart = undefined;
+    }
+
     if (!this._chart) {
-      this._chart = echarts.init(container, undefined, { renderer: "canvas" });
+      this._chartLanguage = language;
+      this._chart = echarts.init(container, undefined, {
+        renderer: "canvas",
+        locale: useLocale(language),
+      });
       // Lovelace resizes cards as columns reflow, and a canvas does not follow
       // on its own.
       this._resize = new ResizeObserver(() => this._chart?.resize());
@@ -274,9 +332,56 @@ export class ScribeCard extends LitElement {
     }
     // `true`: a configuration that dropped a series must not leave it behind.
     this._chart.setOption(
-      resolveFormatters(buildOption(data.chart, this._config, this._theme())),
+      resolveFormatters(
+        buildOption(data.chart, this._config, this._theme()),
+        this.hass?.locale ?? { language: this._language() },
+      ),
       true,
     );
+  }
+
+  /** What the chart shows, for a reader who cannot see it. */
+  private _description(): string {
+    const kind = this._config?.chart ?? "line";
+    const series = this._data?.chart?.series.map((one) => one.name) ?? [];
+    const points = this._data?.chart?.x.length ?? 0;
+    const title = this._config?.title ? `${this._config.title}. ` : "";
+    if (!series.length) return `${title}An empty ${kind} chart.`;
+    const plural = points === 1 ? "" : "s";
+    return `${title}A ${kind} chart of ${series.join(", ")}, over ${points} point${plural}.`;
+  }
+
+  /** The rows behind the chart, for the same reader. A canvas says nothing to
+   * a screen reader, and the numbers are the whole point of the card.
+   *
+   * Wrapped rather than hidden itself: a CSS width on a table is a minimum,
+   * not a maximum, so a table told to be one pixel wide is not. */
+  private _table(): TemplateResult | typeof nothing {
+    const rows = this._rows;
+    if (!rows?.length || rows.length > TABLE_LIMIT || !this._data?.chart) return nothing;
+    const columns = Object.keys(rows[0]);
+    return html`
+      <div class="sr-only">
+        <table>
+          <caption>
+            ${this._config?.title ?? "The query's rows"}
+          </caption>
+          <thead>
+            <tr>
+              ${columns.map((column) => html`<th>${column}</th>`)}
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(
+              (row) =>
+                html`<tr>
+                  ${columns.map((column) => html`<td>${row[column]}</td>`)}
+                </tr>`,
+            )}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   protected override render(): TemplateResult {
@@ -315,8 +420,10 @@ export class ScribeCard extends LitElement {
           <div
             class="chart ${hide ? "hidden" : ""}"
             style=${`height:${this._config.height ?? 250}px`}
+            role="img"
+            aria-label=${this._description()}
           ></div>
-          ${this._loading ? html`<div class="loading"></div>` : nothing}
+          ${this._table()} ${this._loading ? html`<div class="loading"></div>` : nothing}
         </div>
       </ha-card>
     `;
@@ -335,6 +442,17 @@ export class ScribeCard extends LitElement {
     }
     .chart.hidden {
       display: none;
+    }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      margin: -1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+      border: 0;
     }
     .error,
     .empty,
