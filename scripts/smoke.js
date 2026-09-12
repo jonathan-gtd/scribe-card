@@ -79,7 +79,11 @@ await page.evaluate(() => {
     callService: async (domain, service, data) => {
       window.__calls++;
       window.__sql.push(data?.sql);
-      if (window.__fail) throw new Error('relation "states" does not exist');
+      // Home Assistant rejects a service call with its websocket error object,
+      // not with an Error. Anything gentler here tests a case that never happens.
+      if (window.__fail) {
+        throw { code: "unknown_error", message: 'Query failed: relation "states" does not exist' };
+      }
       return { response: { result: window.__rows } };
     },
     connection: {
@@ -164,6 +168,7 @@ await check("a query that fails shows what the database said", async () => {
   assert.equal(shown.error, true, "the error block is missing");
   assert.equal(shown.chart, false, "a chart was drawn from a failed query");
   assert.match(shown.text, /relation "states" does not exist/);
+  assert.doesNotMatch(shown.text, /\[object Object\]/, "the card described the error object");
 });
 
 await check("a refresh that fails keeps the chart that worked", async () => {

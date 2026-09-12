@@ -17,8 +17,36 @@ const CACHE_MS = 2000;
 
 const cache = new Map<string, { at: number; rows: Promise<Row[]> }>();
 
+/**
+ * What went wrong, as a sentence.
+ *
+ * Home Assistant rejects a service call with its websocket error object —
+ * `{code, message}` — and not with an `Error`. Left alone, that reaches the
+ * card as "[object Object]", which is the opposite of the point: Scribe went
+ * to the trouble of reporting what the database said.
+ */
+function describe(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const { message, code } = error as { message?: unknown; code?: unknown };
+    if (typeof message === "string" && message) return message;
+    if (typeof code === "string" && code) return code;
+    try {
+      return JSON.stringify(error);
+    } catch {
+      // A cycle in something nobody was going to read anyway.
+    }
+  }
+  return String(error);
+}
+
 async function ask(hass: HomeAssistant, sql: string): Promise<Row[]> {
-  const result = await hass.callService("scribe", "query", { sql }, undefined, false, true);
+  let result;
+  try {
+    result = await hass.callService("scribe", "query", { sql }, undefined, false, true);
+  } catch (error: unknown) {
+    throw new Error(describe(error));
+  }
   const rows = (result?.response as { result?: Row[] } | undefined)?.result;
   if (!Array.isArray(rows)) throw new Error("the query returned no rows array");
   return rows;
