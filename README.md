@@ -2,7 +2,7 @@
 
 A Lovelace card that charts the result of a SQL query, through the [Scribe](https://github.com/jonathan-gtd/scribe) integration.
 
-![Two Scribe cards: daily minimum, average and maximum temperature over a month, and states recorded per hour](docs/screenshot.png)
+![Two Scribe cards: daily minimum, average and maximum temperature over a month, and states recorded per hour](https://raw.githubusercontent.com/jonathan-gtd/scribe-card/master/docs/screenshot.png)
 
 _The card itself, rendered with sample rows by `npm run screenshot`._
 
