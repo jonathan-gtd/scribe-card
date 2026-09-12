@@ -9,8 +9,15 @@
  * Pure: no DOM, no ECharts import. It is the part worth testing.
  */
 
+import { numberFormatter, timeLevels, usesAmPm } from "./locale";
 import type { Chart, Series } from "./series";
-import type { ScribeCardConfig } from "./types";
+import type { HassLocale, ScribeCardConfig } from "./types";
+
+/** Marks an option an ECharts function has to replace, which plain data cannot
+ * carry. `resolveFormatters` swaps them for the real thing. */
+const VALUE = "__value__";
+const NUMBER = "__number__";
+const TIME = "__time__";
 
 /** Readable on both themes, and distinguishable for the commonest colour blindness. */
 export const PALETTE = [
@@ -94,7 +101,11 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
     type: chart.kind === "time" ? "time" : chart.kind === "number" ? "value" : "category",
     ...(chart.kind === "category" ? { data: chart.x } : {}),
     axisLine,
-    axisLabel: { color: theme.secondaryText, hideOverlap: true },
+    axisLabel: {
+      color: theme.secondaryText,
+      hideOverlap: true,
+      ...(chart.kind === "time" ? { formatter: TIME } : {}),
+    },
     splitLine: { show: false },
   };
 
@@ -107,7 +118,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
       // Everything at that instant, which is what a history chart is read for.
       trigger: chart.kind === "category" ? "item" : "axis",
       axisPointer: { type: "line", lineStyle: { color: theme.secondaryText } },
-      valueFormatter: unit ? `__unit__${unit}` : undefined,
+      valueFormatter: `${VALUE}${unit}`,
     },
     legend: {
       show: config.legend ?? chart.series.length > 1,
@@ -123,7 +134,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
       name: unit || undefined,
       nameTextStyle: { color: theme.secondaryText },
       axisLine: { show: false },
-      axisLabel: { color: theme.secondaryText },
+      axisLabel: { color: theme.secondaryText, formatter: NUMBER },
       splitLine,
     },
     series: chart.series.map((series, index) => seriesOption(series, index, chart, config)),
@@ -143,19 +154,35 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
 }
 
 /**
- * The value formatter, which an option object cannot carry as a function.
+ * The formatters, which an option object cannot carry as functions.
  *
- * `buildOption` marks it with a string so that the whole option stays plain
- * data — comparable in a test, and mergeable — and the card turns the mark
- * into the function ECharts calls.
+ * `buildOption` marks them with strings so that the whole option stays plain
+ * data — comparable in a test, and mergeable — and the card turns the marks
+ * into what ECharts calls: the dashboard's own way of writing numbers, and its
+ * own clock on the time axis.
  */
-export function resolveFormatters(option: Dict): Dict {
+export function resolveFormatters(option: Dict, locale?: HassLocale): Dict {
+  const number = numberFormatter(locale);
+
   const tooltip = option.tooltip as Dict | undefined;
   const marked = tooltip?.valueFormatter;
-  if (typeof marked === "string" && marked.startsWith("__unit__")) {
-    const unit = marked.slice("__unit__".length);
+  if (typeof marked === "string" && marked.startsWith(VALUE)) {
+    const unit = marked.slice(VALUE.length);
     tooltip!.valueFormatter = (value: unknown) =>
-      value === null || value === undefined ? "—" : `${value} ${unit}`;
+      value === null || value === undefined ? "—" : `${number(value)}${unit ? ` ${unit}` : ""}`;
   }
+
+  // `options:` can replace an axis with a list of them, and a user who did that
+  // owns its labels; only the marks this file left are swapped.
+  const axes = [option.xAxis, option.yAxis].flatMap((axis) =>
+    Array.isArray(axis) ? axis : [axis],
+  );
+  for (const axis of axes) {
+    const label = (axis as Dict | undefined)?.axisLabel as Dict | undefined;
+    if (label?.formatter === NUMBER) label.formatter = (value: unknown) => number(value);
+    // ECharts' leveled time labels: an object, not a function.
+    if (label?.formatter === TIME) label.formatter = timeLevels(usesAmPm(locale));
+  }
+
   return option;
 }

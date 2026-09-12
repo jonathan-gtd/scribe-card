@@ -50,6 +50,7 @@ for (const [rows, config] of [
     temperature,
     {
       type: "custom:scribe-card",
+      sql: "SELECT day, minimum, average, maximum FROM …",
       title: "Outside temperature, daily minimum, average and maximum",
       unit: "°C",
       height: 240,
@@ -59,6 +60,7 @@ for (const [rows, config] of [
     throughput,
     {
       type: "custom:scribe-card",
+      sql: "SELECT time, states FROM …",
       title: "States recorded per hour",
       chart: "area",
       height: 200,
@@ -69,7 +71,7 @@ for (const [rows, config] of [
   await page.evaluate(
     async ({ rows, config }) => {
       const card = document.createElement("scribe-card");
-      card.setConfig({ ...config, sql: "…" });
+      card.setConfig({ sql: "…", ...config });
       card.hass = {
         themes: { darkMode: false },
         language: "en",

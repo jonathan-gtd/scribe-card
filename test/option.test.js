@@ -78,12 +78,61 @@ test("colours follow the configuration, then the palette", () => {
 });
 
 test("a unit names the axis and follows the values in the tooltip", () => {
-  const built = resolveFormatters(option(TIME_ROWS, { unit: "°C" }));
+  const built = resolveFormatters(option(TIME_ROWS, { unit: "°C" }), { language: "en" });
 
   assert.equal(built.yAxis.name, "°C");
   assert.equal(typeof built.tooltip.valueFormatter, "function");
   assert.equal(built.tooltip.valueFormatter(21.5), "21.5 °C");
   assert.equal(built.tooltip.valueFormatter(null), "—", "a gap is not 'null °C'");
+  // No unit: the number still comes back, without a trailing space.
+  const plain = resolveFormatters(option(TIME_ROWS), { language: "en" });
+  assert.equal(plain.tooltip.valueFormatter(21.5), "21.5");
+});
+
+test("the values are written the way the dashboard writes numbers", () => {
+  const french = resolveFormatters(option(TIME_ROWS, { unit: "°C" }), {
+    language: "fr",
+    number_format: "space_comma",
+  });
+  // 1234.5 is "1 234,5" in French, with a non-breaking space for the thousands.
+  assert.match(french.tooltip.valueFormatter(1234.5), /^1.234,5 °C$/);
+  assert.match(french.yAxis.axisLabel.formatter(1234.5), /^1.234,5$/);
+
+  // `none` is someone asking for the digits they wrote, untouched.
+  const raw = resolveFormatters(option(TIME_ROWS), { number_format: "none" });
+  assert.equal(raw.yAxis.axisLabel.formatter(1234.5), "1234.5");
+});
+
+test("a time axis is labelled on the dashboard's clock", () => {
+  const twelve = resolveFormatters(option(TIME_ROWS), { time_format: "am_pm" });
+  const twenty_four = resolveFormatters(option(TIME_ROWS), { time_format: "twenty_four" });
+
+  // ECharts' leveled labels: an object per zoom level, not a function.
+  assert.equal(twelve.xAxis.axisLabel.formatter.hour, "{h}:{mm} {A}");
+  assert.equal(twenty_four.xAxis.axisLabel.formatter.hour, "{HH}:{mm}");
+  assert.equal(twenty_four.xAxis.axisLabel.formatter.year, "{yyyy}");
+});
+
+test("a category axis has no clock to label", () => {
+  const rows = [
+    { entity_id: "sensor.b", rows: 30 },
+    { entity_id: "sensor.a", rows: 10 },
+  ];
+  const built = resolveFormatters(option(rows, { chart: "bar" }, "entity_id"), { language: "en" });
+  assert.equal(built.xAxis.type, "category");
+  assert.equal(built.xAxis.axisLabel.formatter, undefined);
+});
+
+test("an axis the configuration replaced keeps what it was given", () => {
+  // `options:` wins, and a user who wrote their own axes owns their labels.
+  const built = resolveFormatters(
+    option(TIME_ROWS, { options: { yAxis: [{ name: "°C" }, { name: "%" }] } }),
+    { language: "en" },
+  );
+  assert.deepEqual(
+    built.yAxis.map((axis) => axis.name),
+    ["°C", "%"],
+  );
 });
 
 test("zoom adds the two ECharts zooms and room for the slider", () => {
