@@ -26,9 +26,19 @@ import { customElement, property, state } from "lit/decorators.js";
 import "./editor";
 import { echartsLocale } from "./locale";
 import { buildOption, resolveFormatters, type Theme } from "./option";
+import { fingerprint, read, readLocal, storageKey, write } from "./persist";
 import { runQuery } from "./query";
+import {
+  DEFAULT_RANGES,
+  hasMarkers,
+  isRange,
+  labelFor,
+  parseDuration,
+  substitute,
+  type Range,
+} from "./range";
 import { pickXColumn, pickYColumns, toChart, type Chart } from "./series";
-import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
+import type { HassLocale, HomeAssistant, Row, ScribeCardConfig } from "./types";
 
 /** Replaced at build time with the version in package.json, so it cannot drift. */
 declare const __VERSION__: string;
@@ -60,6 +70,9 @@ const GRID_GAP = 8;
  * to walk; the label above it still says what the chart shows. */
 const TABLE_LIMIT = 200;
 
+/** The row above the chart, when there is anything to put in it. */
+const TOOLBAR = 36;
+
 /** ECharts keeps its locales by name; this card only ever needs the one Home
  * Assistant is in, rebuilt whenever that changes. */
 const LOCALE_CODE = "HA";
@@ -86,6 +99,10 @@ export class ScribeCard extends LitElement {
   @state() private _rows?: Row[];
   @state() private _error?: string;
   @state() private _loading = false;
+  /** The window of time the card is looking at, when its query leaves one. */
+  @state() private _range?: Range;
+  @state() private _menu = false;
+  @state() private _custom = false;
 
   private _chart?: echarts.ECharts;
   private _resize?: ResizeObserver;
@@ -97,6 +114,9 @@ export class ScribeCard extends LitElement {
   private _drawnTheme?: string;
   /** The language the chart was built in: ECharts takes it once, at init. */
   private _chartLanguage?: string;
+  /** The ranges the picker offers, and where the chosen one is filed. */
+  private _ranges: string[] = [];
+  private _key?: string;
 
   /** The visual editor Lovelace opens for this card. */
   public static getConfigElement(): HTMLElement {
@@ -136,15 +156,37 @@ export class ScribeCard extends LitElement {
     if (config.colors !== undefined && !Array.isArray(config.colors)) {
       throw new Error("scribe-card: `colors` must be a list");
     }
+    if (config.ranges !== undefined) {
+      if (!Array.isArray(config.ranges)) throw new Error("scribe-card: `ranges` must be a list");
+      for (const range of config.ranges) {
+        if (parseDuration(range) === null) {
+          throw new Error(`scribe-card: \`${String(range)}\` is not a range, such as 24h or 7d`);
+        }
+      }
+    }
 
     this._config = config;
     this._queried = false;
     this._rows = undefined;
     this._error = undefined;
+
+    // A query with holes in it gets a picker; the rest of the card is unchanged
+    // by any of this.
+    this._ranges = hasMarkers(config.sql) ? (config.ranges ?? DEFAULT_RANGES) : [];
+    this._key = storageKey(
+      config.storage_key || fingerprint(`${config.title ?? ""}|${config.sql}`),
+    );
+    this._range = this._ranges.length ? { last: this._ranges[0] } : undefined;
+    if (this._ranges.length) {
+      // What this browser remembers is there now; what Home Assistant remembers
+      // takes a round trip, and arrives in `_restore`.
+      const remembered = readLocal(this._key);
+      if (isRange(remembered)) this._range = remembered;
+    }
   }
 
   public getCardSize(): number {
-    return Math.ceil((this._config?.height ?? 250) / 50);
+    return Math.ceil(((this._config?.height ?? 250) + (this._hasToolbar() ? TOOLBAR : 0)) / 50);
   }
 
   /** How much of a sections view the card asks for.
@@ -154,7 +196,7 @@ export class ScribeCard extends LitElement {
    * the chart inside it. A row is 56 pixels with 8 between them, and the chart
    * sits under the header with the content's padding around it. */
   public getGridOptions(): Record<string, unknown> {
-    const chrome = (this._config?.title ? 44 : 0) + 20;
+    const chrome = (this._config?.title ? 44 : 0) + 20 + (this._hasToolbar() ? TOOLBAR : 0);
     const pixels = (this._config?.height ?? 250) + chrome;
     const rows = Math.max(1, Math.ceil((pixels + GRID_GAP) / (GRID_ROW + GRID_GAP)));
     return { columns: "full", rows, min_columns: 6, min_rows: 2 };
@@ -163,6 +205,8 @@ export class ScribeCard extends LitElement {
   public override connectedCallback(): void {
     super.connectedCallback();
     document.addEventListener("visibilitychange", this._onVisibility);
+    document.addEventListener("click", this._onDocumentClick);
+    document.addEventListener("keydown", this._onKeydown);
     this._scheduleRefresh();
     // Moving a card around a dashboard disconnects and reconnects the element.
     // The chart was disposed on the way out, and no property changed to ask for
@@ -173,6 +217,8 @@ export class ScribeCard extends LitElement {
   public override disconnectedCallback(): void {
     super.disconnectedCallback();
     document.removeEventListener("visibilitychange", this._onVisibility);
+    document.removeEventListener("click", this._onDocumentClick);
+    document.removeEventListener("keydown", this._onKeydown);
     this._stopRefresh();
     this._resize?.disconnect();
     this._resize = undefined;
@@ -201,6 +247,7 @@ export class ScribeCard extends LitElement {
     if (!this._queried && this.hass && this._config) {
       this._queried = true;
       void this._query();
+      void this._restore();
       this._scheduleRefresh();
     }
     const themed = this._themeSignature() !== this._drawnTheme;
@@ -219,6 +266,71 @@ export class ScribeCard extends LitElement {
     this._scheduleRefresh();
   };
 
+  /** What Home Assistant remembers for this user, wherever they last chose it.
+   * It arrives after the first query, and only changes anything when it
+   * disagrees with what this browser had. */
+  private async _restore(): Promise<void> {
+    if (!this.hass || !this._key || !this._ranges.length) return;
+    const remembered = await read(this.hass, this._key);
+    if (!isRange(remembered)) return;
+    if (JSON.stringify(remembered) === JSON.stringify(this._range)) return;
+    this._range = remembered;
+    void this._query(true);
+  }
+
+  private _pick(range: Range): void {
+    this._menu = false;
+    this._custom = false;
+    if (JSON.stringify(range) === JSON.stringify(this._range)) return;
+    this._range = range;
+    void this._query(true);
+    if (this.hass && this._key) void write(this.hass, this._key, range);
+  }
+
+  private _toggleMenu(): void {
+    this._menu = !this._menu;
+    if (!this._menu) this._custom = false;
+  }
+
+  /** A click anywhere that is not the picker closes it. */
+  private _onDocumentClick = (event: Event): void => {
+    if (!this._menu) return;
+    const picker = this.renderRoot?.querySelector(".picker");
+    if (picker && event.composedPath().includes(picker)) return;
+    this._menu = false;
+    this._custom = false;
+  };
+
+  private _onKeydown = (event: KeyboardEvent): void => {
+    if (event.key === "Escape" && this._menu) {
+      this._menu = false;
+      this._custom = false;
+    }
+  };
+
+  /** The two instants the custom panel is holding. */
+  private _applyCustom(): void {
+    const at = (name: string) =>
+      this.renderRoot?.querySelector<HTMLInputElement>(`input[name="${name}"]`)?.value;
+    const from = Date.parse(at("from") ?? "");
+    const to = Date.parse(at("to") ?? "");
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) return;
+    this._pick({ from, to });
+  }
+
+  /** A picker only makes sense when the query left something for it to fill. */
+  private _hasToolbar(): boolean {
+    return Boolean(this._ranges.length || this._config?.export === true);
+  }
+
+  private _hasExport(): boolean {
+    return this._hasToolbar() && (this._config?.export ?? true);
+  }
+
+  private _locale(): HassLocale {
+    return this.hass?.locale ?? { language: this._language() };
+  }
+
   private _refreshSeconds(): number {
     const seconds = this._config?.refresh_interval ?? 0;
     return seconds > 0 ? Math.max(seconds, MIN_REFRESH_SECONDS) : 0;
@@ -236,12 +348,18 @@ export class ScribeCard extends LitElement {
     this._timer = undefined;
   }
 
+  /** The query, with whatever the picker is showing written into it. */
+  private _sql(): string {
+    const sql = this._config?.sql ?? "";
+    return this._range ? substitute(sql, this._range, Date.now()) : sql;
+  }
+
   /** `fresh` is a refresh: it has to reach the database, which is the point. */
   private async _query(fresh = false): Promise<void> {
     if (!this.hass || !this._config) return;
     this._loading = true;
     try {
-      this._rows = await runQuery(this.hass, this._config.sql, fresh);
+      this._rows = await runQuery(this.hass, this._sql(), fresh);
       this._error = undefined;
     } catch (error: unknown) {
       // Scribe reports what the database said; showing it is the whole point.
@@ -384,6 +502,111 @@ export class ScribeCard extends LitElement {
     `;
   }
 
+  /** The rows as a CSV file, which is what someone looking at a chart and
+   * wanting the numbers behind it is after. */
+  private _csv(): string {
+    const rows = this._rows ?? [];
+    if (!rows.length) return "";
+    const columns = Object.keys(rows[0]);
+    const cell = (value: unknown) => {
+      const text = value === null || value === undefined ? "" : String(value);
+      return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+    };
+    return [
+      columns.join(","),
+      ...rows.map((row) => columns.map((column) => cell(row[column])).join(",")),
+    ].join("\n");
+  }
+
+  private _download(): void {
+    const blob = new Blob([this._csv()], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${(this._config?.title || "scribe").replace(/[^\w.-]+/g, "-").toLowerCase()}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /** `datetime-local` reads and writes wall-clock time, which is not what an
+   * epoch is. */
+  private static _forInput(ms: number): string {
+    const local = new Date(ms - new Date(ms).getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 16);
+  }
+
+  private _picker(): TemplateResult {
+    const locale = this._locale();
+    const current = this._range;
+    const now = Date.now();
+    const from = current && "from" in current ? current.from : now - 86_400_000;
+    const to = current && "from" in current ? current.to : now;
+
+    return html`
+      <div class="picker">
+        <button
+          class="trigger"
+          aria-haspopup="listbox"
+          aria-expanded=${this._menu ? "true" : "false"}
+          @click=${this._toggleMenu}
+        >
+          <ha-icon icon="mdi:clock-outline"></ha-icon>
+          <span>${current ? labelFor(current, locale) : "Any time"}</span>
+          <span class="caret" aria-hidden="true">▾</span>
+        </button>
+        ${
+          this._menu
+            ? html`<div class="menu" role="listbox">
+                ${this._ranges.map((text) => {
+                  const range: Range = { last: text };
+                  const chosen = JSON.stringify(range) === JSON.stringify(current);
+                  return html`<button
+                    class="choice ${chosen ? "chosen" : ""}"
+                    role="option"
+                    aria-selected=${chosen ? "true" : "false"}
+                    @click=${() => this._pick(range)}
+                  >
+                    ${labelFor(range, locale)}
+                  </button>`;
+                })}
+                <button
+                  class="choice ${this._custom ? "chosen" : ""}"
+                  @click=${() => {
+                    this._custom = !this._custom;
+                  }}
+                >
+                  Custom…
+                </button>
+                ${
+                  this._custom
+                    ? html`<div class="custom">
+                        <label>
+                          From
+                          <input
+                            type="datetime-local"
+                            name="from"
+                            .value=${ScribeCard._forInput(from)}
+                          />
+                        </label>
+                        <label>
+                          To
+                          <input
+                            type="datetime-local"
+                            name="to"
+                            .value=${ScribeCard._forInput(to)}
+                          />
+                        </label>
+                        <button class="apply" @click=${this._applyCustom}>Apply</button>
+                      </div>`
+                    : nothing
+                }
+              </div>`
+            : nothing
+        }
+      </div>
+    `;
+  }
+
   protected override render(): TemplateResult {
     if (!this._config) return html``;
     const data = this._data;
@@ -393,8 +616,28 @@ export class ScribeCard extends LitElement {
     const hide = blocked || Boolean(data?.problem);
 
     return html`
-      <ha-card .header=${this._config.title}>
+      <ha-card class=${this._menu ? "open" : ""} .header=${this._config.title}>
         <div class="content">
+          ${
+            this._hasToolbar()
+              ? html`<div class="toolbar">
+                  ${this._ranges.length ? this._picker() : nothing}
+                  ${
+                    this._hasExport()
+                      ? html`<button
+                          class="icon"
+                          title="Download these rows as CSV"
+                          aria-label="Download these rows as CSV"
+                          ?disabled=${!this._rows?.length}
+                          @click=${this._download}
+                        >
+                          <ha-icon icon="mdi:table-arrow-down"></ha-icon>
+                        </button>`
+                      : nothing
+                  }
+                </div>`
+              : nothing
+          }
           ${
             blocked
               ? html`<div class="error">
@@ -433,6 +676,11 @@ export class ScribeCard extends LitElement {
     ha-card {
       overflow: hidden;
     }
+    /* The picker's menu is taller than a short card, and a dropdown that is
+       clipped by the thing it drops out of is no dropdown. */
+    ha-card.open {
+      overflow: visible;
+    }
     .content {
       padding: 8px 12px 12px;
       position: relative;
@@ -442,6 +690,91 @@ export class ScribeCard extends LitElement {
     }
     .chart.hidden {
       display: none;
+    }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 4px;
+      min-height: 28px;
+      margin-bottom: 4px;
+    }
+    .picker {
+      position: relative;
+    }
+    .toolbar button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: none;
+      border-radius: 16px;
+      padding: 5px 10px;
+      background: none;
+      color: var(--secondary-text-color);
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .toolbar button:hover {
+      background: var(--secondary-background-color, rgba(127, 127, 127, 0.15));
+    }
+    .toolbar button[disabled] {
+      opacity: 0.4;
+      cursor: default;
+    }
+    .toolbar ha-icon {
+      --mdc-icon-size: 18px;
+    }
+    .caret {
+      font-size: 10px;
+    }
+    .menu {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 4px);
+      z-index: 2;
+      min-width: 190px;
+      padding: 4px;
+      border-radius: 10px;
+      background: var(--card-background-color, #fff);
+      box-shadow:
+        0 4px 6px rgba(0, 0, 0, 0.15),
+        0 1px 10px rgba(0, 0, 0, 0.12);
+    }
+    .menu .choice {
+      display: block;
+      width: 100%;
+      border-radius: 6px;
+      text-align: left;
+      color: var(--primary-text-color);
+    }
+    .menu .choice.chosen {
+      color: var(--primary-color);
+      font-weight: 500;
+    }
+    .custom {
+      display: grid;
+      gap: 6px;
+      padding: 8px 10px 4px;
+      border-top: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+      font-size: 12px;
+      color: var(--secondary-text-color);
+    }
+    .custom label {
+      display: grid;
+      gap: 2px;
+    }
+    .custom input {
+      border: 1px solid var(--divider-color, rgba(127, 127, 127, 0.25));
+      border-radius: 6px;
+      padding: 4px 6px;
+      background: none;
+      color: var(--primary-text-color);
+      font: inherit;
+    }
+    .custom .apply {
+      justify-content: center;
+      color: var(--primary-color);
     }
     .sr-only {
       position: absolute;
