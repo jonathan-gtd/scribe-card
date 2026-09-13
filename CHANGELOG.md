@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0
 
 **`$__timeFilter(column)`**, which is how Grafana spells it, and **`$__timezone`**, which is the
 instance's own — a day, a week or a month only line up with the calendar if the database is told
