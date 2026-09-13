@@ -96,6 +96,20 @@ export interface ScribeCardConfig {
   labels?: boolean;
   label_position?: string;
 
+  // --- Colour by value ------------------------------------------------------
+
+  /** Draw the first column in `warn_color` above this value — a limit passed. */
+  warn_above?: number;
+  /** And below this one — freezing, or a battery running out. */
+  warn_below?: number;
+  /** What "past the limit" looks like. Defaults to red. */
+  warn_color?: string;
+  /** A gradient across a range of values instead of a threshold. */
+  scale_from?: number;
+  scale_to?: number;
+  /** The colours it runs through, coldest first. */
+  scale_colors?: string[];
+
   // --- Marker lines ---------------------------------------------------------
 
   /** A dashed line across the chart at the first column's average, highest or

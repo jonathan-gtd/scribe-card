@@ -257,6 +257,19 @@ export function editorTabs(columns: string[] = [], drawn: string[] = []): Tab[] 
           schema: colourFields(drawn),
         },
         {
+          name: "byvalue",
+          type: "expandable",
+          flatten: true,
+          title: "Colour by value",
+          icon: "mdi:thermometer",
+          schema: [
+            { name: "", type: "grid", schema: [number("warn_above"), number("warn_below")] },
+            { name: "warn_color", selector: { ui_color: {} } },
+            { name: "", type: "grid", schema: [number("scale_from"), number("scale_to")] },
+            { name: "scale_colors", selector: open(["blue", "green", "yellow", "orange", "red"]) },
+          ],
+        },
+        {
           name: "marks",
           type: "expandable",
           flatten: true,
@@ -518,6 +531,12 @@ export const LABELS: Record<string, string> = {
   mark_min: "The lowest",
   threshold: "A line at",
   threshold_name: "Called",
+  warn_above: "Warn above",
+  warn_below: "Warn below",
+  warn_color: "Warning colour",
+  scale_from: "Scale from",
+  scale_to: "Scale to",
+  scale_colors: "Through",
   tooltip_trigger: "Tooltip shows",
   legend_position: "Legend",
   animation: "Animate",
@@ -549,6 +568,9 @@ export const HELPERS: Record<string, string> = {
   mark_average: "Drawn from the first column. Several averages is several lines.",
   threshold: "A limit, or a target. Left empty, no line.",
   animation: "Off by default: a chart that refreshes should not dance each time.",
+  warn_above: "The first drawn column turns the warning colour past this value.",
+  scale_from: "Or a gradient across a range of values instead. A warning wins over a scale.",
+  scale_colors: "Coldest first. Left empty, blue to red.",
 };
 
 /**
