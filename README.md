@@ -29,9 +29,9 @@ Download `scribe-card.js` from the [latest release](https://github.com/jonathan-
 
 Add a card, search for **Scribe Card**, and fill in the form: the query, the chart type, the unit, the axes. Home Assistant's own selectors, with the card drawn beside them as you type.
 
-![The card beside its editor: three tabs, Query, Chart and Time & data, with collapsible sections](https://raw.githubusercontent.com/jonathan-gtd/scribe-card/master/docs/editor.png)
+![The card beside its editor: four tabs, Query, Chart, Axes and Time & data, with collapsible sections](https://raw.githubusercontent.com/jonathan-gtd/scribe-card/master/docs/editor.png)
 
-The form is in three tabs — **Query**, **Chart**, **Time & data** — with the less common settings
+The form is in four tabs — **Query**, **Chart**, **Axes**, **Time & data** — with the less common settings
 folded into sections you can open. Everything is still one flat YAML card underneath.
 
 **The editor knows your query.** Once it runs, the columns it returned become the choices for the axes — no retyping a name you just wrote in the SQL.
@@ -113,19 +113,19 @@ The form covers these; `options:` and `series:` are for the code editor.
 
 ### Axes
 
-| Option                          | Type                                 | Default              | What it does                                         |
-| ------------------------------- | ------------------------------------ | -------------------- | ---------------------------------------------------- |
-| `y2`                            | string or list                       | —                    | Columns drawn against a second axis, on the right.   |
-| `y_name` / `y2_name`            | string                               | `unit` / `y2_unit`   | What each axis is called.                            |
-| `y_min` / `y_max`               | number                               | fits the values      | Where the left axis starts and stops.                |
-| `y2_min` / `y2_max` / `y2_unit` | number / number / string             | —                    | The same, for the right-hand axis.                   |
-| `y_log` / `y2_log`              | boolean                              | `false`              | A logarithmic axis.                                  |
-| `decimals`                      | number                               | as many as there are | On the axis labels and in the tooltip.               |
-| `x_type`                        | `auto`, `time`, `number`, `category` | `auto`               | What the x axis holds, when the rows are read wrong. |
-| `x_name`                        | string                               | —                    | What the x axis is called.                           |
-| `x_rotate`                      | number                               | —                    | Degrees to turn the x labels by, for long names.     |
-| `split_lines`                   | boolean                              | `true`               | Horizontal lines across the chart.                   |
-| `margin_left` … `margin_bottom` | number                               | `8`/`12`/`12`/`8`    | Room around the chart, in pixels.                    |
+| Option                                                       | Type                                 | Default              | What it does                                         |
+| ------------------------------------------------------------ | ------------------------------------ | -------------------- | ---------------------------------------------------- |
+| `y2`                                                         | string or list                       | —                    | Columns drawn against a second axis, on the right.   |
+| `y_name` / `y2_name`                                         | string                               | `unit` / `y2_unit`   | What each axis is called.                            |
+| `y_min` / `y_max`                                            | number                               | fits the values      | Where the left axis starts and stops.                |
+| `y2_min` / `y2_max` / `y2_unit`                              | number / number / string             | —                    | The same, for the right-hand axis.                   |
+| `y_log` / `y2_log`                                           | boolean                              | `false`              | A logarithmic axis.                                  |
+| `decimals`                                                   | number                               | as many as there are | On the axis labels and in the tooltip.               |
+| `x_type`                                                     | `auto`, `time`, `number`, `category` | `auto`               | What the x axis holds, when the rows are read wrong. |
+| `x_name`                                                     | string                               | —                    | What the x axis is called.                           |
+| `x_rotate`                                                   | number                               | —                    | Degrees to turn the x labels by, for long names.     |
+| `split_lines`                                                | boolean                              | `true`               | Horizontal lines across the chart.                   |
+| `margin_left`, `margin_right`, `margin_top`, `margin_bottom` | number                               | `8`/`12`/`12`/`8`    | Room around the chart, in pixels.                    |
 
 ### One card, several time ranges
 
@@ -245,7 +245,7 @@ The tables and views these queries use are described in [Scribe's data structure
 
 ## Good to know
 
-- **The card weighs 632 KB** (214 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+- **The card weighs 645 KB** (217 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
 
 - **A crowded chart is drawn differently.** Past a few thousand points a line is downsampled with
   LTTB, which keeps the shape of the curve and not the cost of drawing every point of it.
@@ -288,7 +288,18 @@ takes about a minute, and leaves nothing behind — `E2E_KEEP=1` leaves it stand
 to see `ha-form` at all. It reuses a standing instance when there is one, and writes
 `docs/editor.png`.
 
-Releases are built by CI from the tag, and the published file carries a [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations): `gh attestation verify scribe-card.js --repo jonathan-gtd/scribe-card`.
+Releases are built by CI from the tag, and the published file carries a [build provenance attestation](https://docs.github.com/actions/security-guides/using-artifact-attestations):
+
+```
+gh attestation verify scribe-card.js --repo jonathan-gtd/scribe-card
+```
+
+That subcommand arrived in `gh` 2.49; an older one answers with its help text rather than a
+verification. The attestation itself is there either way, and the REST API will say so:
+
+```
+gh api repos/jonathan-gtd/scribe-card/attestations/sha256:$(sha256sum scribe-card.js | cut -d" " -f1)
+```
 
 ## License
 
