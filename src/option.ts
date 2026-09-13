@@ -77,6 +77,20 @@ export function merge<T extends Dict>(base: T, over: Dict | undefined): T {
   return result as T;
 }
 
+/** Where the legend sits, and which way it runs when it is beside the chart. */
+function legendPlace(where: string): Dict {
+  switch (where) {
+    case "bottom":
+      return { bottom: 0, left: "center" };
+    case "left":
+      return { left: 0, top: "middle", orient: "vertical" };
+    case "right":
+      return { right: 0, top: "middle", orient: "vertical" };
+    default:
+      return { top: 0, left: "center" };
+  }
+}
+
 /** Room around the chart. The slider under a zoomable chart needs its own. */
 function margins(config: ScribeCardConfig, zoomed: boolean): Dict {
   return {
@@ -88,7 +102,60 @@ function margins(config: ScribeCardConfig, zoomed: boolean): Dict {
   };
 }
 
-function seriesOption(series: Series, index: number, chart: Chart, config: ScribeCardConfig): Dict {
+/** The fill under a line: a flat wash, or one that fades towards the bottom. */
+function fillStyle(colour: string, config: ScribeCardConfig): Dict {
+  if (!config.gradient) return { color: colour, opacity: config.opacity ?? 0.18 };
+  // A gradient carries its own fading towards the bottom, so the flat opacity
+  // of a plain fill would fade it twice.
+  return {
+    opacity: config.opacity ?? 0.55,
+    color: {
+      type: "linear",
+      x: 0,
+      y: 0,
+      x2: 0,
+      y2: 1,
+      colorStops: [
+        { offset: 0, color: colour },
+        { offset: 1, color: "transparent" },
+      ],
+    },
+  };
+}
+
+/**
+ * The lines drawn across the chart.
+ *
+ * On the first series only: an average line per series turns four series into
+ * twelve lines, and a threshold belongs to the chart rather than to any one
+ * column of it.
+ */
+function markLines(config: ScribeCardConfig, theme: Theme): Dict | undefined {
+  const data: Dict[] = [];
+  if (config.mark_average) data.push({ type: "average", name: "Average" });
+  if (config.mark_max) data.push({ type: "max", name: "Highest" });
+  if (config.mark_min) data.push({ type: "min", name: "Lowest" });
+  if (typeof config.threshold === "number" && Number.isFinite(config.threshold)) {
+    data.push({ yAxis: config.threshold, name: config.threshold_name ?? "Limit" });
+  }
+  if (!data.length) return undefined;
+
+  return {
+    silent: true,
+    symbol: "none",
+    data,
+    lineStyle: { color: theme.secondaryText, type: "dashed", width: 1 },
+    label: { color: theme.secondaryText, formatter: "{b}", position: "insideEndTop" },
+  };
+}
+
+function seriesOption(
+  series: Series,
+  index: number,
+  chart: Chart,
+  config: ScribeCardConfig,
+  theme: Theme,
+): Dict {
   const colours = config.colors ?? PALETTE;
   const colour = colours[index % colours.length];
   const type = config.chart === "bar" ? "bar" : config.chart === "scatter" ? "scatter" : "line";
@@ -99,6 +166,8 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
   // Past a few thousand points the canvas slows down and the drawing gains
   // nothing: LTTB keeps the shape of a line with far fewer of them.
   const crowded = chart.x.length > CROWDED;
+  const symbol = config.symbol ?? "circle";
+  const marks = index === 0 ? markLines(config, theme) : undefined;
 
   const base: Dict = {
     name: series.name,
@@ -125,19 +194,38 @@ function seriesOption(series: Series, index: number, chart: Chart, config: Scrib
     ...(type === "line"
       ? {
           // Points on every sample turn a year of history into soup; the line
-          // carries the shape, and hovering still finds the value.
-          showSymbol: false,
-          symbolSize: 6,
+          // carries the shape, and hovering still finds the value. Asking for
+          // a symbol is asking to see them.
+          showSymbol:
+            (config.symbol !== undefined || config.symbol_size !== undefined) && symbol !== "none",
+          symbol: symbol === "none" ? "circle" : symbol,
+          symbolSize: config.symbol_size ?? 6,
           smooth: config.smooth ?? false,
-          lineStyle: { width: 2, color: colour },
-          ...(filled ? { areaStyle: { color: colour, opacity: 0.18 } } : {}),
+          lineStyle: { width: config.line_width ?? 2, color: colour },
+          ...(filled ? { areaStyle: fillStyle(colour, config) } : {}),
           ...(config.step ? { step: config.step } : {}),
           ...(crowded ? { sampling: "lttb" } : {}),
+          ...(config.connect_nulls ? { connectNulls: true } : {}),
         }
       : crowded
         ? { large: true }
         : {}),
-    ...(config.stacked ? { stack: "total" } : {}),
+    ...(type === "bar" && config.bar_width !== undefined ? { barWidth: config.bar_width } : {}),
+    ...(type === "scatter"
+      ? { symbol: symbol === "none" ? "circle" : symbol, symbolSize: config.symbol_size ?? 10 }
+      : {}),
+    ...(config.stacked || config.stack_mode ? { stack: "total" } : {}),
+    ...(config.labels
+      ? {
+          label: {
+            show: true,
+            position: config.label_position ?? (type === "bar" ? "top" : "top"),
+            color: theme.text,
+            formatter: mark(VALUE, { unit: config.unit ?? "", decimals: config.decimals }),
+          },
+        }
+      : {}),
+    ...(marks ? { markLine: marks } : {}),
   };
 
   // `series:` takes ECharts series options, by column name.
@@ -194,17 +282,19 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
   const option: Dict = {
     // The card draws its own header, and a chart title would sit under it.
     backgroundColor: "transparent",
-    animation: false,
+    // A chart that redraws every thirty seconds should not dance each time.
+    animation: config.animation ?? false,
     grid: margins(config, false),
     tooltip: {
+      ...(config.tooltip_trigger === "none" ? { show: false } : {}),
       // Everything at that instant, which is what a history chart is read for.
-      trigger: chart.kind === "category" ? "item" : "axis",
+      trigger: config.tooltip_trigger ?? (chart.kind === "category" ? "item" : "axis"),
       axisPointer: { type: "line", lineStyle: { color: theme.secondaryText } },
       valueFormatter: mark(VALUE, { unit, decimals: config.decimals }),
     },
     legend: {
       show: config.legend ?? chart.series.length > 1,
-      top: 0,
+      ...legendPlace(config.legend_position ?? "top"),
       icon: "roundRect",
       itemWidth: 10,
       itemHeight: 10,
@@ -213,7 +303,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
     xAxis,
     // A second axis only exists when something is drawn against it.
     yAxis: toList(config.y2).length ? [valueAxis("left"), valueAxis("right")] : valueAxis("left"),
-    series: chart.series.map((series, index) => seriesOption(series, index, chart, config)),
+    series: chart.series.map((series, index) => seriesOption(series, index, chart, config, theme)),
     ...(config.zoom
       ? {
           // Drag to zoom, wheel to scale — what makes a long history readable.

@@ -80,6 +80,56 @@ export function axisKind(rows: Row[], xColumn: string): AxisKind {
 }
 
 /**
+ * Each moment's values as shares of that moment, adding to a hundred.
+ *
+ * ECharts stacks what it is given; it has no notion of stacking proportions,
+ * so the proportions are worked out here. A moment where everything is missing
+ * stays missing rather than becoming a hundred per cent of nothing.
+ */
+export function asPercentages(chart: Chart): Chart {
+  const series = chart.series.map((one) => ({ name: one.name, values: [...one.values] }));
+
+  chart.x.forEach((_, index) => {
+    let total = 0;
+    for (const one of series) total += one.values[index] ?? 0;
+    for (const one of series) {
+      const value = one.values[index];
+      one.values[index] = value === null || total === 0 ? null : (value / total) * 100;
+    }
+  });
+
+  return { ...chart, series };
+}
+
+/**
+ * A chart of labels, put in order of its first drawn column.
+ *
+ * Only labels: a time axis is already in the only order it has, and sorting a
+ * line by its values would draw something that never happened.
+ */
+export function sortCategories(chart: Chart, direction: "asc" | "desc"): Chart {
+  if (chart.kind !== "category" || !chart.series.length) return chart;
+
+  const by = chart.series[0].values;
+  const order = chart.x
+    .map((_, index) => index)
+    .sort((a, b) => {
+      const left = by[a] ?? Number.NEGATIVE_INFINITY;
+      const right = by[b] ?? Number.NEGATIVE_INFINITY;
+      return direction === "asc" ? left - right : right - left;
+    });
+
+  return {
+    ...chart,
+    x: order.map((index) => chart.x[index]),
+    series: chart.series.map((one) => ({
+      name: one.name,
+      values: order.map((index) => one.values[index]),
+    })),
+  };
+}
+
+/**
  * Rows to a chart.
  *
  * A missing or non-numeric y is a gap rather than a zero: a sensor that

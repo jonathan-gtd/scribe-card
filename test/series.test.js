@@ -8,7 +8,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { pickXColumn, pickYColumns, toChart } from "../.test/series.js";
+import {
+  asPercentages,
+  pickXColumn,
+  pickYColumns,
+  sortCategories,
+  toChart,
+} from "../.test/series.js";
 
 test("the x column is the one that looks like time", () => {
   assert.equal(pickXColumn(["entity_id", "time", "value"]), "time");
@@ -116,4 +122,56 @@ test("several series keep their own values", () => {
     { name: "min", values: [1, 2] },
     { name: "max", values: [9, 8] },
   ]);
+});
+
+test("stacking shares of a moment adds up to a hundred", () => {
+  const rows = [
+    { time: "2026-09-12T10:00:00Z", a: 30, b: 10 },
+    { time: "2026-09-12T11:00:00Z", a: 1, b: 3 },
+  ];
+  const shares = asPercentages(toChart(rows, "time", ["a", "b"]));
+
+  assert.deepEqual(shares.series[0].values, [75, 25]);
+  assert.deepEqual(shares.series[1].values, [25, 75]);
+  // The x axis and the names are untouched.
+  assert.deepEqual(
+    shares.series.map((one) => one.name),
+    ["a", "b"],
+  );
+});
+
+test("a moment where everything is missing stays missing", () => {
+  const rows = [
+    { time: "2026-09-12T10:00:00Z", a: null, b: null },
+    { time: "2026-09-12T11:00:00Z", a: null, b: 4 },
+  ];
+  const shares = asPercentages(toChart(rows, "time", ["a", "b"]));
+
+  // Not a hundred per cent of nothing.
+  assert.deepEqual(shares.series[0].values, [null, null]);
+  assert.deepEqual(shares.series[1].values, [null, 100]);
+});
+
+test("a chart of labels can be put in order of its values", () => {
+  const rows = [
+    { room: "kitchen", rows: 10 },
+    { room: "hall", rows: 30 },
+    { room: "attic", rows: 20 },
+  ];
+  const chart = toChart(rows, "room", ["rows"]);
+
+  assert.deepEqual(sortCategories(chart, "desc").x, ["hall", "attic", "kitchen"]);
+  assert.deepEqual(sortCategories(chart, "asc").series[0].values, [10, 20, 30]);
+
+  // A chart of times is already in the only order it has; sorting it would
+  // draw something that never happened.
+  const times = toChart(
+    [
+      { time: "2026-09-12T11:00:00Z", value: 1 },
+      { time: "2026-09-12T10:00:00Z", value: 9 },
+    ],
+    "time",
+    ["value"],
+  );
+  assert.deepEqual(sortCategories(times, "desc").series[0].values, times.series[0].values);
 });

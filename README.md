@@ -79,6 +79,38 @@ The form covers these; `options:` and `series:` are for the code editor.
 | `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.            |
 | `series`           | object                           | —                                             | **ECharts series options**, by column name.                       |
 
+### How the series are drawn
+
+| Option           | Type                                                           | Default | What it does                                             |
+| ---------------- | -------------------------------------------------------------- | ------- | -------------------------------------------------------- |
+| `line_width`     | number                                                         | `2`     | Thickness of the line, in pixels.                        |
+| `opacity`        | number                                                         | `0.18`  | How solid the fill under a line is, from 0 to 1.         |
+| `gradient`       | boolean                                                        | `false` | Fade the fill towards the bottom instead of a flat wash. |
+| `symbol`         | `none`, `circle`, `emptyCircle`, `rect`, `triangle`, `diamond` | —       | A mark on every point.                                   |
+| `symbol_size`    | number                                                         | `6`     | How big that mark is.                                    |
+| `connect_nulls`  | boolean                                                        | `false` | Join across gaps instead of leaving the line broken.     |
+| `bar_width`      | number or string                                               | —       | Bar thickness, in pixels or as `60%`.                    |
+| `stack_mode`     | `total`, `percent`                                             | `total` | Stack the values, or their share of each moment.         |
+| `sort`           | `none`, `asc`, `desc`                                          | `none`  | Order a chart of labels by its first drawn column.       |
+| `labels`         | boolean                                                        | `false` | Write the value beside each point.                       |
+| `label_position` | string                                                         | `top`   | Where, in ECharts' own words.                            |
+
+### Lines across the chart
+
+| Option                                   | Type    | Default | What it does                                                    |
+| ---------------------------------------- | ------- | ------- | --------------------------------------------------------------- |
+| `mark_average` / `mark_max` / `mark_min` | boolean | `false` | A dashed line at the first column's average, highest or lowest. |
+| `threshold`                              | number  | —       | A line at a value of your own — a limit, a target.              |
+| `threshold_name`                         | string  | `Limit` | What that line is called.                                       |
+
+### Reading the chart
+
+| Option            | Type                             | Default | What it does                                                           |
+| ----------------- | -------------------------------- | ------- | ---------------------------------------------------------------------- |
+| `legend_position` | `top`, `bottom`, `left`, `right` | `top`   | Where the legend sits.                                                 |
+| `tooltip_trigger` | `axis`, `item`, `none`           | `axis`  | Everything at that moment, only what is under the pointer, or nothing. |
+| `animation`       | boolean                          | `false` | A chart that refreshes should not dance each time.                     |
+
 ### Axes
 
 | Option                          | Type                                 | Default              | What it does                                         |

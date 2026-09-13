@@ -72,6 +72,51 @@ export interface ScribeCardConfig {
   /** Offer the rows as a CSV file. On by default wherever the toolbar shows. */
   export?: boolean;
 
+  // --- How the series are drawn --------------------------------------------
+
+  /** Thickness of the line, in pixels. */
+  line_width?: number;
+  /** How solid the fill under a line is, from 0 to 1. */
+  opacity?: number;
+  /** Fade the fill towards the bottom instead of a flat wash. */
+  gradient?: boolean;
+  /** A mark on every point: `none`, `circle`, `emptyCircle`, `rect`, `triangle`, `diamond`. */
+  symbol?: string;
+  symbol_size?: number;
+  /** Join across gaps instead of leaving the line broken. */
+  connect_nulls?: boolean;
+  /** Bar thickness, in pixels or as a percentage such as `60%`. */
+  bar_width?: number | string;
+  /** `total` stacks the values; `percent` stacks their share of each moment. */
+  stack_mode?: "total" | "percent";
+  /** Sort a chart of labels by its first drawn column. */
+  sort?: "none" | "asc" | "desc";
+
+  /** Write the value beside each point. */
+  labels?: boolean;
+  label_position?: string;
+
+  // --- Marker lines ---------------------------------------------------------
+
+  /** A dashed line across the chart at the first column's average, highest or
+   * lowest value. */
+  mark_average?: boolean;
+  mark_max?: boolean;
+  mark_min?: boolean;
+  /** A line at a value of your own — a limit, a target. */
+  threshold?: number;
+  threshold_name?: string;
+
+  // --- The rest of the chart ------------------------------------------------
+
+  /** `axis` shows everything at that instant, `item` only what is under the
+   * pointer, `none` shows nothing. */
+  tooltip_trigger?: "axis" | "item" | "none";
+  legend_position?: "top" | "bottom" | "left" | "right";
+  /** Off by default: a chart that redraws every thirty seconds should not
+   * dance each time. */
+  animation?: boolean;
+
   // --- Axes ----------------------------------------------------------------
 
   /** Columns to draw against a second axis, on the right. */

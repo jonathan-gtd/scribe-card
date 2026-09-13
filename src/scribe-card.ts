@@ -37,7 +37,14 @@ import {
   substitute,
   type Range,
 } from "./range";
-import { pickXColumn, pickYColumns, toChart, type Chart } from "./series";
+import {
+  asPercentages,
+  pickXColumn,
+  pickYColumns,
+  sortCategories,
+  toChart,
+  type Chart,
+} from "./series";
 import type { HassLocale, HomeAssistant, Row, ScribeCardConfig } from "./types";
 
 /** Replaced at build time with the version in package.json, so it cannot drift. */
@@ -148,6 +155,17 @@ export class ScribeCard extends LitElement {
     if (config.x_type !== undefined && !X_TYPES.includes(config.x_type)) {
       throw new Error(`scribe-card: \`x_type\` must be one of ${X_TYPES.join(", ")}`);
     }
+    for (const [key, allowed] of [
+      ["stack_mode", ["total", "percent"]],
+      ["sort", ["none", "asc", "desc"]],
+      ["tooltip_trigger", ["axis", "item", "none"]],
+      ["legend_position", ["top", "bottom", "left", "right"]],
+    ] as const) {
+      const value = config[key];
+      if (value !== undefined && !(allowed as readonly string[]).includes(value)) {
+        throw new Error(`scribe-card: \`${key}\` must be one of ${allowed.join(", ")}`);
+      }
+    }
     if (config.y2 !== undefined && typeof config.y2 !== "string" && !Array.isArray(config.y2)) {
       throw new Error("scribe-card: `y2` must be a column name or a list of them");
     }
@@ -164,6 +182,10 @@ export class ScribeCard extends LitElement {
       "margin_right",
       "margin_top",
       "margin_bottom",
+      "line_width",
+      "opacity",
+      "symbol_size",
+      "threshold",
     ] as const) {
       const value = config[key];
       if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
@@ -402,9 +424,14 @@ export class ScribeCard extends LitElement {
       return { problem: `No numeric column to draw. The query returned: ${columns.join(", ")}.` };
     }
     const forced = this._config.x_type;
-    return {
-      chart: toChart(this._rows, x, y, forced && forced !== "auto" ? forced : undefined),
-    };
+    let chart = toChart(this._rows, x, y, forced && forced !== "auto" ? forced : undefined);
+    // Both are about the numbers rather than how they are drawn, so they
+    // happen here and ECharts is handed the result.
+    if (this._config.stack_mode === "percent") chart = asPercentages(chart);
+    if (this._config.sort && this._config.sort !== "none") {
+      chart = sortCategories(chart, this._config.sort);
+    }
+    return { chart };
   }
 
   /** What the card was painted against: a custom theme changes the colours
