@@ -65,6 +65,7 @@ const DASHBOARD = {
         {
           type: "custom:scribe-card",
           title: "Two axes",
+          sync_group: "lab",
           unit: "°C",
           height: 200,
           y2: "releves",
@@ -80,6 +81,7 @@ const DASHBOARD = {
         {
           type: "custom:scribe-card",
           title: "Shares",
+          sync_group: "lab",
           unit: "°C",
           height: 200,
           chart: "bar",
@@ -491,6 +493,58 @@ await check("colours are picked from the theme, one per drawn series", async () 
     false,
   );
   assert.doesNotMatch(seen.text, /#[0-9a-f]{6}/i, "hexadecimal is still being shown");
+});
+
+await check(
+  "Grafana's way of asking for a range works, and lines up with the calendar",
+  async () => {
+    const asked = await page.evaluate(async (timezone) => {
+      const hass = document.querySelector("home-assistant").hass;
+      const sent = [];
+      const real = hass.callService.bind(hass);
+      hass.callService = (domain, service, data, ...rest) => {
+        sent.push(data?.sql);
+        return real(domain, service, data, ...rest);
+      };
+
+      const card = document.createElement("scribe-card");
+      card.setConfig({
+        type: "custom:scribe-card",
+        ranges: ["7d"],
+        sql: `SELECT time_bucket($__interval, time, $__timezone) AS time, avg(value) AS v
+            FROM states WHERE entity_id = 'sensor.e2e_temperature' AND $__timeFilter(time)
+            GROUP BY 1 ORDER BY 1`,
+      });
+      document.querySelector("home-assistant").append(card);
+      card.hass = hass;
+      await card.updateComplete;
+      await new Promise((done) => setTimeout(done, 2500));
+
+      const drew = Boolean(card.shadowRoot.querySelector(".chart canvas"));
+      const error = card.shadowRoot.querySelector(".error")?.textContent ?? "";
+      card.remove();
+      hass.callService = real;
+      return { sql: sent.at(-1) ?? "", drew, error, timezone };
+    }, null);
+
+    assert.equal(asked.sql.includes("$__"), false, `a marker survived: ${asked.sql}`);
+    assert.match(
+      asked.sql,
+      /time >= '[\d:.TZ-]+'::timestamptz AND time < '[\d:.TZ-]+'::timestamptz/,
+    );
+    assert.match(asked.sql, /time_bucket\('30 minutes', time, '[A-Za-z]+\/[A-Za-z_]+'\)/);
+    assert.equal(asked.error, "", "the database refused the query");
+    assert.equal(asked.drew, true, "nothing was drawn from it");
+  },
+);
+
+await check("cards that name the same group share a pointer", async () => {
+  const seen = await Promise.all(
+    ["Two axes", "Shares"].map(async (title) =>
+      (await card(page, title)).evaluate((element) => element._chart?.group),
+    ),
+  );
+  assert.deepEqual(seen, ["lab", "lab"], "the charts were never put in a group");
 });
 
 await check("the editor is in tabs, and each one shows its own fields", async () => {

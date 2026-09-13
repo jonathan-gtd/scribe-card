@@ -400,10 +400,18 @@ export class ScribeCard extends LitElement {
     this._timer = undefined;
   }
 
+  /** The calendar the database should count in, for a bucket that has to line
+   * up with midnight or the first of the month. */
+  private _timezone(): string {
+    return (
+      this.hass?.config?.time_zone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+    );
+  }
+
   /** The query, with whatever the picker is showing written into it. */
   private _sql(): string {
     const sql = this._config?.sql ?? "";
-    return this._range ? substitute(sql, this._range, Date.now()) : sql;
+    return this._range ? substitute(sql, this._range, Date.now(), this._timezone()) : sql;
   }
 
   /** `fresh` is a refresh: it has to reach the database, which is the point. */
@@ -529,6 +537,12 @@ export class ScribeCard extends LitElement {
         renderer: "canvas",
         locale: useLocale(language),
       });
+      // Cards that name the same group share a pointer: hovering a moment on
+      // one marks the same moment on all of them.
+      if (this._config.sync_group) {
+        this._chart.group = this._config.sync_group;
+        echarts.connect(this._config.sync_group);
+      }
       // Lovelace resizes cards as columns reflow, and a canvas does not follow
       // on its own.
       this._resize = new ResizeObserver(() => this._chart?.resize());

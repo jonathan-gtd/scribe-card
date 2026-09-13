@@ -57,6 +57,9 @@ const BUCKETS: [string, number][] = [
   ["12 hours", 43_200_000],
   ["1 day", 86_400_000],
   ["1 week", 604_800_000],
+  // A month is not a fixed width, and `time_bucket` only takes one when it is
+  // also told which calendar to count in — which `$__timezone` provides.
+  ["1 month", 2_592_000_000],
 ];
 
 /** Points beyond this are a chart nobody reads and rows nobody needed. */
@@ -104,8 +107,19 @@ export function bucketFor(span: number): string {
 
 /** Whether a query leaves anything for a range to fill. */
 export function hasMarkers(sql: string): boolean {
-  return /\$__(from|to|interval)\b/.test(sql);
+  return /\$__(from|to|interval|timeFilter|timezone)\b/.test(sql);
 }
+
+/**
+ * `$__timeFilter(column)`, which is how Grafana spells it.
+ *
+ * Anyone who has written a dashboard there reaches for it without thinking,
+ * and writing `column >= $__from AND column < $__to` by hand says the same
+ * thing three times over. Only a plain column name is accepted — anything else
+ * is left exactly as it was written rather than guessed at.
+ */
+const TIME_FILTER =
+  /\$__timeFilter\(\s*("?[A-Za-z_][A-Za-z0-9_$]*"?(?:\.\s*"?[A-Za-z_][A-Za-z0-9_$]*"?)?)\s*\)/g;
 
 /**
  * The query, with the range written into it.
@@ -113,11 +127,17 @@ export function hasMarkers(sql: string): boolean {
  * Fixed instants rather than `now()`: both ends and every bucket then agree
  * with each other, however many times the query mentions them.
  */
-export function substitute(sql: string, range: Range, now: number): string {
+export function substitute(sql: string, range: Range, now: number, timezone?: string): string {
   const { from, to } = resolve(range, now);
   const stamp = (at: number) => `'${new Date(at).toISOString()}'::timestamptz`;
+  // A timezone only ever comes from the browser or Home Assistant, and an
+  // Olson name has no room for anything else in it.
+  const zone = /^[A-Za-z][A-Za-z0-9+\-_/]*$/.test(timezone ?? "") ? timezone : "UTC";
+
   return sql
+    .replace(TIME_FILTER, (_, column) => `${column} >= ${stamp(from)} AND ${column} < ${stamp(to)}`)
     .replaceAll("$__interval", `'${bucketFor(to - from)}'`)
+    .replaceAll("$__timezone", `'${zone}'`)
     .replaceAll("$__from", stamp(from))
     .replaceAll("$__to", stamp(to));
 }
