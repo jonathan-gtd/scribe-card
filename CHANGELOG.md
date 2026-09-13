@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**`$__timeFilter(column)`**, which is how Grafana spells it, and **`$__timezone`**, which is the
+instance's own — a day, a week or a month only line up with the calendar if the database is told
+which calendar to count in. Without it `time_bucket('1 day', time)` starts its days at midnight
+UTC rather than where you live.
+
+**`sync_group`**: cards given the same name share a pointer, so hovering one moment on any of them
+marks it on all the others.
+
 **Colour from the value.** `warn_above` draws the first column in a warning colour past a limit,
 `warn_below` under one, and `scale_from` / `scale_to` run it through a gradient instead. ECharts'
 `visualMap` is now bundled, which it never was — an `options: { visualMap: … }` written by hand did

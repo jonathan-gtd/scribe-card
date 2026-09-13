@@ -73,6 +73,7 @@ test("the bucket keeps a range to a few hundred points", () => {
       "12 hours": 12 * HOUR,
       "1 day": DAY,
       "1 week": 7 * DAY,
+      "1 month": 30 * DAY,
     };
     return span / widths[interval];
   };
@@ -85,8 +86,11 @@ test("the bucket keeps a range to a few hundred points", () => {
   // The finest that fits, not the coarsest that would.
   assert.equal(bucketFor(HOUR), "1 minute");
   assert.equal(bucketFor(DAY), "5 minutes");
-  // Nothing above a week: time_bucket() wants a fixed width, and a month is not.
-  assert.equal(bucketFor(3650 * DAY), "1 week");
+  // A month is not a fixed width, so it needs `$__timezone` to say which
+  // calendar it is a month of — but ten years of hours is nothing else.
+  assert.equal(bucketFor(3650 * DAY), "1 month");
+  assert.equal(bucketFor(365 * DAY), "1 day", "a year is 365 points, which is a chart");
+  assert.equal(bucketFor(3 * 365 * DAY), "1 week", "three of them is not");
 });
 
 test("a query says whether it has anything for a range to fill", () => {
@@ -164,4 +168,44 @@ test("a query can be read before anyone has chosen a range", () => {
   const asked = substitute(sql, defaultRange(["7d"]), Date.parse("2026-09-12T12:00:00Z"));
   assert.equal(asked.includes("$__"), false, "the editor would have asked with markers in it");
   assert.match(asked, /'30 minutes'/);
+});
+
+test("$__timeFilter is Grafana's way of saying the same thing", () => {
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+  const sql = substitute("SELECT 1 FROM states WHERE $__timeFilter(time)", { last: "24h" }, now);
+
+  assert.match(sql, /WHERE time >= '2026-09-11T12:00:00\.000Z'::timestamptz/);
+  assert.match(sql, /AND time < '2026-09-12T12:00:00\.000Z'::timestamptz/);
+
+  // A qualified or quoted column is still a column.
+  assert.match(substitute("$__timeFilter(s.time)", { last: "1h" }, now), /^s\.time >= /);
+  assert.match(substitute('$__timeFilter("time")', { last: "1h" }, now), /^"time" >= /);
+  assert.match(substitute("$__timeFilter( time )", { last: "1h" }, now), /^time >= /);
+
+  // Anything that is not a plain column is left exactly as written rather than
+  // guessed at — and never becomes part of the query as something else.
+  const odd = "$__timeFilter(now() - interval '1 day')";
+  assert.equal(substitute(odd, { last: "1h" }, now), odd);
+});
+
+test("a bucket can be told which calendar to count in", () => {
+  const now = Date.parse("2026-09-12T12:00:00.000Z");
+  const sql = substitute(
+    "SELECT time_bucket($__interval, time, $__timezone) FROM states",
+    { last: "7d" },
+    now,
+    "Europe/Paris",
+  );
+
+  assert.match(sql, /time_bucket\('30 minutes', time, 'Europe\/Paris'\)/);
+  // Without a calendar, a day starts at midnight UTC and not where you live.
+  assert.match(substitute("$__timezone", { last: "1h" }, now), /^'UTC'$/);
+  // And a timezone is an Olson name, or it is not used.
+  assert.match(substitute("$__timezone", { last: "1h" }, now, "'; DROP TABLE"), /^'UTC'$/);
+});
+
+test("a query is asked about every marker it might carry", () => {
+  assert.equal(hasMarkers("WHERE $__timeFilter(time)"), true);
+  assert.equal(hasMarkers("time_bucket($__interval, time, $__timezone)"), true);
+  assert.equal(hasMarkers("SELECT 1"), false);
 });

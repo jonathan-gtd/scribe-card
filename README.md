@@ -73,8 +73,9 @@ The form covers these; `options:` and `series:` are for the code editor.
 | `smooth`           | boolean                          | `false`                                       | Curve the line instead of joining the points straight.                                                                                                   |
 | `step`             | `start`, `middle`, `end`         | —                                             | Draw as steps, which is what a thermostat really does.                                                                                                   |
 | `zoom`             | boolean                          | `false`                                       | Drag to zoom, with a scrollbar under the chart.                                                                                                          |
-| `ranges`           | list                             | seven, from `1h` to `1y`                      | Time ranges to offer. Needs `$__from`, `$__to` or `$__interval`.                                                                                         |
+| `ranges`           | list                             | seven, from `1h` to `1y`                      | Time ranges to offer. Needs one of the `$__` markers in the query.                                                                                       |
 | `storage_key`      | string                           | the query itself                              | What the chosen range is remembered under.                                                                                                               |
+| `sync_group`       | string                           | —                                             | Cards given the same name here share a pointer: hovering one moment on any of them marks it on all the others.                                           |
 | `export`           | boolean                          | `true`                                        | Offer the rows as a CSV file, wherever the toolbar shows.                                                                                                |
 | `debug`            | boolean                          | `false`                                       | Show how many rows came back and how long they took, and put the query — every marker filled in — in the browser console.                                |
 | `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.                                                                                                   |
@@ -165,11 +166,13 @@ over thirty days is forty-three thousand points.
 
 Leave the period out instead, and the card fills it in:
 
-| Marker        | Becomes                                                        |
-| ------------- | -------------------------------------------------------------- |
-| `$__from`     | the start of the chosen range, as a `timestamptz`              |
-| `$__to`       | its end                                                        |
-| `$__interval` | a bucket width that keeps the range under a few hundred points |
+| Marker                  | Becomes                                                                           |
+| ----------------------- | --------------------------------------------------------------------------------- |
+| `$__from`               | the start of the chosen range, as a `timestamptz`                                 |
+| `$__to`                 | its end                                                                           |
+| `$__interval`           | a bucket width that keeps the range under a few hundred points                    |
+| `$__timeFilter(column)` | `column >= … AND column < …`, which is how Grafana spells it                      |
+| `$__timezone`           | the instance's own timezone, so a bucket can line up with midnight where you live |
 
 ```yaml
 type: custom:scribe-card
@@ -180,6 +183,19 @@ sql: >
   FROM states_raw
   WHERE time >= $__from AND time < $__to
   GROUP BY 1 ORDER BY 1
+```
+
+Coming from Grafana, `WHERE $__timeFilter(time)` says the same as `time >= $__from AND time <
+$__to`, and works here too.
+
+A day, a week or a month only line up with the calendar if the database is told which calendar to
+count in — without that, `time_bucket('1 day', time)` starts its days at midnight UTC. `$__timezone`
+is the instance's own:
+
+```sql
+SELECT time_bucket($__interval, time, $__timezone) AS time, avg(value) AS moyenne
+FROM states WHERE entity_id = 'sensor.outside_temperature' AND $__timeFilter(time)
+GROUP BY 1 ORDER BY 1
 ```
 
 A picker appears at the top of the card, with the ranges above and **Custom…** for two exact

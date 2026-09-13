@@ -61,7 +61,12 @@ export class ScribeCardEditor extends LitElement {
       // Through the same filling-in the card does, or a query written with
       // `$__from` in it never runs here and the columns never arrive — while
       // the preview beside this form draws perfectly well.
-      const asked = substitute(sql, defaultRange(this._config.ranges), Date.now());
+      const asked = substitute(
+        sql,
+        defaultRange(this._config.ranges),
+        Date.now(),
+        this.hass.config?.time_zone,
+      );
       const rows = await runQuery(this.hass, asked);
       this._rows = rows;
       this._columns = rows.length ? Object.keys(rows[0]) : [];

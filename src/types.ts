@@ -21,6 +21,8 @@ export interface HomeAssistant {
   language: string;
   /** Present on any recent frontend; `language` is the fallback. */
   locale?: HassLocale;
+  /** The instance's own configuration; only its timezone is read. */
+  config?: { time_zone?: string };
   /** The services Home Assistant knows about, by domain. Without
    * `scribe.query` in it, the integration is missing or too old. */
   services?: Record<string, Record<string, unknown>>;
@@ -64,9 +66,12 @@ export interface ScribeCardConfig {
   /** Fill under the line. `chart: area` is the same thing. */
   fill?: boolean;
 
-  /** Time ranges to offer, as `24h`, `7d`, `1y`. Needs `$__from`, `$__to` or
-   * `$__interval` in the query; the choice is remembered per user. */
+  /** Time ranges to offer, as `24h`, `7d`, `1y`. Needs one of the `$__`
+   * markers in the query; the choice is remembered per user. */
   ranges?: string[];
+  /** Cards sharing a name share a pointer: hovering one moment on any of them
+   * marks it on all the others. */
+  sync_group?: string;
   /** Pins what the remembered range is filed under. Defaults to the query. */
   storage_key?: string;
   /** Offer the rows as a CSV file. On by default wherever the toolbar shows. */
