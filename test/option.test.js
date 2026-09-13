@@ -247,3 +247,73 @@ test("the room around the chart can be given away", () => {
   assert.equal(option(TIME_ROWS, { zoom: true }).grid.bottom, 28);
   assert.equal(option(TIME_ROWS, { zoom: true, margin_bottom: 60 }).grid.bottom, 60);
 });
+
+test("the line can be given a thickness, a fill and marks on its points", () => {
+  const built = option(TIME_ROWS, {
+    fill: true,
+    line_width: 4,
+    opacity: 0.5,
+    symbol: "diamond",
+    symbol_size: 9,
+  });
+
+  assert.equal(built.series[0].lineStyle.width, 4);
+  assert.equal(built.series[0].areaStyle.opacity, 0.5);
+  assert.equal(built.series[0].symbol, "diamond");
+  assert.equal(built.series[0].symbolSize, 9);
+  assert.equal(built.series[0].showSymbol, true, "asking for a symbol is asking to see it");
+  // None of which happens unless it is asked for.
+  assert.equal(option(TIME_ROWS).series[0].showSymbol, false);
+  assert.equal(option(TIME_ROWS).series[0].lineStyle.width, 2);
+});
+
+test("a fade is a gradient, not a fainter wash", () => {
+  const flat = option(TIME_ROWS, { fill: true }).series[0].areaStyle;
+  const faded = option(TIME_ROWS, { fill: true, gradient: true }).series[0].areaStyle;
+
+  assert.equal(typeof flat.color, "string", "a plain fill is one colour");
+  assert.equal(faded.color.type, "linear");
+  assert.equal(faded.color.colorStops.at(-1).color, "transparent", "it fades to nothing");
+  // A gradient carries its own fading; fading it again would double it.
+  assert.ok(faded.opacity > flat.opacity);
+});
+
+test("lines across the chart are drawn once, not once per series", () => {
+  const built = option(TIME_ROWS, { mark_average: true, threshold: 30, threshold_name: "Limit" });
+
+  const marks = built.series[0].markLine.data;
+  assert.deepEqual(
+    marks.map((one) => one.type ?? one.yAxis),
+    ["average", 30],
+  );
+  assert.equal(marks[1].name, "Limit");
+  // Four series would otherwise be four averages and four limits.
+  assert.equal(built.series[1].markLine, undefined);
+  assert.equal(option(TIME_ROWS).series[0].markLine, undefined, "none unless asked for");
+});
+
+test("the legend can be moved, and the tooltip silenced", () => {
+  assert.equal(option(TIME_ROWS).legend.top, 0, "above, as before");
+
+  const right = option(TIME_ROWS, { legend_position: "right" }).legend;
+  assert.equal(right.right, 0);
+  assert.equal(right.orient, "vertical", "beside the chart it has to run downwards");
+
+  assert.equal(option(TIME_ROWS, { tooltip_trigger: "item" }).tooltip.trigger, "item");
+  assert.equal(option(TIME_ROWS, { tooltip_trigger: "none" }).tooltip.show, false);
+});
+
+test("values can be written beside the points, in the dashboard's own numbers", () => {
+  const built = resolveFormatters(option(TIME_ROWS, { labels: true, unit: "°C", decimals: 1 }), {
+    language: "en",
+  });
+
+  assert.equal(built.series[0].label.show, true);
+  assert.equal(built.series[0].label.formatter(21.46), "21.5 °C");
+  assert.equal(option(TIME_ROWS).series[0].label, undefined);
+});
+
+test("a chart that refreshes does not dance each time", () => {
+  assert.equal(option(TIME_ROWS).animation, false);
+  assert.equal(option(TIME_ROWS, { animation: true }).animation, true);
+});

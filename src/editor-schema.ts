@@ -175,7 +175,111 @@ export function editorTabs(columns: string[] = []): Tab[] {
             { name: "fill", selector: { boolean: {} } },
             { name: "smooth", selector: { boolean: {} } },
             { name: "stacked", selector: { boolean: {} } },
+            {
+              name: "stack_mode",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "total", label: "Their values" },
+                    { value: "percent", label: "Their share, out of a hundred" },
+                  ],
+                },
+              },
+            },
+            {
+              name: "",
+              type: "grid",
+              schema: [number("line_width", "px"), number("opacity")],
+            },
+            { name: "gradient", selector: { boolean: {} } },
+            {
+              name: "",
+              type: "grid",
+              schema: [
+                {
+                  name: "symbol",
+                  selector: {
+                    select: {
+                      mode: "dropdown",
+                      options: [
+                        { value: "none", label: "None" },
+                        { value: "circle", label: "Circle" },
+                        { value: "emptyCircle", label: "Hollow circle" },
+                        { value: "rect", label: "Square" },
+                        { value: "triangle", label: "Triangle" },
+                        { value: "diamond", label: "Diamond" },
+                      ],
+                    },
+                  },
+                },
+                number("symbol_size", "px"),
+              ],
+            },
+            { name: "connect_nulls", selector: { boolean: {} } },
+            { name: "bar_width", selector: { text: {} } },
             { name: "colors", selector: open(PALETTE) },
+          ],
+        },
+        {
+          name: "marks",
+          type: "expandable",
+          flatten: true,
+          title: "Lines across the chart",
+          icon: "mdi:format-align-middle",
+          schema: [
+            { name: "mark_average", selector: { boolean: {} } },
+            { name: "mark_max", selector: { boolean: {} } },
+            { name: "mark_min", selector: { boolean: {} } },
+            {
+              name: "",
+              type: "grid",
+              schema: [number("threshold"), { name: "threshold_name", selector: { text: {} } }],
+            },
+          ],
+        },
+        {
+          name: "reading",
+          type: "expandable",
+          flatten: true,
+          title: "Reading the chart",
+          icon: "mdi:magnify",
+          schema: [
+            { name: "labels", selector: { boolean: {} } },
+            {
+              name: "",
+              type: "grid",
+              schema: [
+                {
+                  name: "legend_position",
+                  selector: {
+                    select: {
+                      mode: "dropdown",
+                      options: [
+                        { value: "top", label: "Above" },
+                        { value: "bottom", label: "Below" },
+                        { value: "left", label: "Left" },
+                        { value: "right", label: "Right" },
+                      ],
+                    },
+                  },
+                },
+                {
+                  name: "tooltip_trigger",
+                  selector: {
+                    select: {
+                      mode: "dropdown",
+                      options: [
+                        { value: "axis", label: "Everything at that moment" },
+                        { value: "item", label: "Only what is under the pointer" },
+                        { value: "none", label: "Nothing" },
+                      ],
+                    },
+                  },
+                },
+              ],
+            },
+            { name: "animation", selector: { boolean: {} } },
           ],
         },
       ],
@@ -279,6 +383,19 @@ export function editorTabs(columns: string[] = []): Tab[] {
         },
         { name: "zoom", selector: { boolean: {} } },
         {
+          name: "sort",
+          selector: {
+            select: {
+              mode: "dropdown",
+              options: [
+                { value: "none", label: "As the query returned them" },
+                { value: "asc", label: "Smallest first" },
+                { value: "desc", label: "Largest first" },
+              ],
+            },
+          },
+        },
+        {
           name: "remembering",
           type: "expandable",
           flatten: true,
@@ -336,6 +453,25 @@ export const LABELS: Record<string, string> = {
   margin_right: "Right",
   margin_top: "Top",
   margin_bottom: "Bottom",
+  line_width: "Line thickness",
+  opacity: "Fill strength",
+  gradient: "Fade the fill",
+  symbol: "Mark each point",
+  symbol_size: "Mark size",
+  connect_nulls: "Join across gaps",
+  bar_width: "Bar thickness",
+  stack_mode: "Stack",
+  sort: "Order",
+  labels: "Write the values",
+  label_position: "Where",
+  mark_average: "The average",
+  mark_max: "The highest",
+  mark_min: "The lowest",
+  threshold: "A line at",
+  threshold_name: "Called",
+  tooltip_trigger: "Tooltip shows",
+  legend_position: "Legend",
+  animation: "Animate",
 };
 
 /** A line of help under the fields that need one. */
@@ -355,6 +491,14 @@ export const HELPERS: Record<string, string> = {
   x_type: "Left as it is, the rows decide. Change it when they decide wrong.",
   x_rotate: "For long labels that would otherwise overlap.",
   margin_left: "Room for the axis labels, in pixels.",
+  opacity: "From 0 to 1. Only where something is filled.",
+  connect_nulls: "A sensor that reported nothing did not report zero — join it anyway.",
+  bar_width: "In pixels, or a percentage such as 60%.",
+  stack_mode: "Only where the series are stacked.",
+  sort: "Only a chart of labels; a chart of times is already in order.",
+  mark_average: "Drawn from the first column. Several averages is several lines.",
+  threshold: "A limit, or a target. Left empty, no line.",
+  animation: "Off by default: a chart that refreshes should not dance each time.",
 };
 
 /**
@@ -378,6 +522,15 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
     y_log: false,
     y2_log: false,
     x_type: "auto",
+    gradient: false,
+    connect_nulls: false,
+    labels: false,
+    animation: false,
+    mark_average: false,
+    mark_max: false,
+    mark_min: false,
+    sort: "none",
+    legend_position: "top",
   };
 
   const config: Record<string, unknown> = {};
