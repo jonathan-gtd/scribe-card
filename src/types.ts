@@ -71,6 +71,9 @@ export interface ScribeCardConfig {
   storage_key?: string;
   /** Offer the rows as a CSV file. On by default wherever the toolbar shows. */
   export?: boolean;
+  /** Show what the card asked for and what came back, and log the query. For
+   * working out why a card behaves oddly on somebody else's dashboard. */
+  debug?: boolean;
 
   // --- How the series are drawn --------------------------------------------
 
