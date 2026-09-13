@@ -124,6 +124,8 @@ export class ScribeCard extends LitElement {
   private _drawnTheme?: string;
   /** The language the chart was built in: ECharts takes it once, at init. */
   private _chartLanguage?: string;
+  /** What the last query asked for and what it cost, for `debug`. */
+  @state() private _stats?: { rows: number; ms: number; sql: string };
   /** The ranges the picker offers, and where the chosen one is filed. */
   private _ranges: string[] = [];
   private _key?: string;
@@ -408,14 +410,31 @@ export class ScribeCard extends LitElement {
   private async _query(fresh = false): Promise<void> {
     if (!this.hass || !this._config) return;
     this._loading = true;
+    const sql = this._sql();
+    const started = performance.now();
     try {
-      this._rows = await runQuery(this.hass, this._sql(), fresh);
+      this._rows = await runQuery(this.hass, sql, fresh);
       this._error = undefined;
+      if (this._config.debug) {
+        this._stats = {
+          rows: this._rows.length,
+          ms: Math.round(performance.now() - started),
+          sql,
+        };
+        // The query as the database saw it, every marker filled in.
+        // eslint-disable-next-line no-console
+        console.info("[scribe-card]", this._config.title ?? "", "\n" + sql);
+      }
     } catch (error: unknown) {
       // Scribe reports what the database said; showing it is the whole point.
       // The rows that did load stay: a database that hiccuped once must not
       // replace a month of history with a sentence.
       this._error = error instanceof Error ? error.message : String(error);
+      if (this._config.debug) {
+        this._stats = { rows: 0, ms: Math.round(performance.now() - started), sql };
+        // eslint-disable-next-line no-console
+        console.warn("[scribe-card]", this._error, "\n" + sql);
+      }
     } finally {
       this._loading = false;
     }
@@ -733,7 +752,17 @@ export class ScribeCard extends LitElement {
             role="img"
             aria-label=${this._description()}
           ></div>
-          ${this._table()} ${this._loading ? html`<div class="loading"></div>` : nothing}
+          ${this._table()}
+          ${
+            this._config.debug && this._stats
+              ? html`<div class="debug">
+                  ${this._stats.rows} rows · ${this._stats.ms} ms
+                  ${this._range ? html`· ${labelFor(this._range, this._locale())}` : nothing} · the
+                  query is in the console
+                </div>`
+              : nothing
+          }
+          ${this._loading ? html`<div class="loading"></div>` : nothing}
         </div>
       </ha-card>
     `;
@@ -842,6 +871,13 @@ export class ScribeCard extends LitElement {
     .custom .apply {
       justify-content: center;
       color: var(--primary-color);
+    }
+    .debug {
+      padding: 4px 8px 0;
+      color: var(--secondary-text-color);
+      font-family: monospace;
+      font-size: 11px;
+      opacity: 0.8;
     }
     .sr-only {
       position: absolute;

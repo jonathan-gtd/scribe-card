@@ -554,6 +554,38 @@ await check("the rows come back as a CSV file", async () => {
   assert.match(file.type, /^text\/csv/);
 });
 
+await check("a card told to explain itself does, and one not told stays quiet", async () => {
+  const seen = await page.evaluate(async () => {
+    const logged = [];
+    const info = console.info;
+    console.info = (...parts) => logged.push(parts.join(" "));
+
+    const noisy = await window.__card({ title: "Noisy", debug: true });
+    const quiet = await window.__card({ title: "Quiet" });
+    console.info = info;
+
+    const footer = (card) => card.shadowRoot.querySelector(".debug")?.textContent.trim() ?? "";
+    const seen = { noisy: footer(noisy), quiet: footer(quiet), logged };
+    noisy.remove();
+    quiet.remove();
+    return seen;
+  });
+
+  assert.match(seen.noisy, /24 rows · \d+ ms/, `the footer said ${JSON.stringify(seen.noisy)}`);
+  assert.equal(seen.quiet, "", "a card nobody asked explained itself anyway");
+  // The query as the database saw it, which is the point of asking.
+  assert.equal(
+    seen.logged.some((line) => line.includes("Noisy") && line.includes("SELECT")),
+    true,
+    "the query never reached the console",
+  );
+  assert.equal(
+    seen.logged.some((line) => line.includes("Quiet")),
+    false,
+    "the quiet card logged anyway",
+  );
+});
+
 await browser.close();
 
 for (const [ok, name, error] of checks) {

@@ -7,6 +7,10 @@
 `visualMap` is now bundled, which it never was — an `options: { visualMap: … }` written by hand did
 nothing at all before this. It costs 38 KB, 12 of them over the wire.
 
+**`debug: true`** puts the row count and the time the query took under the chart, and the query
+itself — every marker filled in — in the browser console. For working out why a card behaves oddly
+on somebody else's dashboard without asking them for a container log.
+
 **Colours are picked, not typed.** The editor shows one of Home Assistant's colour pickers per
 drawn series, and a colour it has a name for — `red`, `primary` — follows the theme rather than
 being fixed. Hexadecimal is still accepted.
