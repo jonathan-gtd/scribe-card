@@ -8,7 +8,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { buildOption, merge, PALETTE, resolveFormatters } from "../.test/option.js";
+import { PALETTE, buildOption, merge, resolveColour, resolveFormatters } from "../.test/option.js";
 import { toChart } from "../.test/series.js";
 
 const THEME = { text: "#111", secondaryText: "#777", grid: "#ddd", background: "#fff" };
@@ -316,4 +316,76 @@ test("values can be written beside the points, in the dashboard's own numbers", 
 test("a chart that refreshes does not dance each time", () => {
   assert.equal(option(TIME_ROWS).animation, false);
   assert.equal(option(TIME_ROWS, { animation: true }).animation, true);
+});
+
+test("naming a column that is not drawn does not raise an axis for it", () => {
+  // A typo, or a column a rewritten query no longer returns.
+  const built = option(TIME_ROWS, { y2: "humidity" });
+  assert.equal(Array.isArray(built.yAxis), false, "an axis was raised for nothing");
+  assert.equal(
+    built.series.every((one) => one.yAxisIndex === undefined),
+    true,
+  );
+});
+
+test("a chart of shares is labelled as shares", () => {
+  const built = resolveFormatters(
+    option(TIME_ROWS, { stack_mode: "percent", unit: "°C", y2: "maximum", y2_unit: "n" }),
+    { language: "en" },
+  );
+
+  assert.equal(built.yAxis[0].name, "%", "the axis still claimed degrees");
+  assert.equal(built.yAxis[0].min, 0);
+  assert.equal(built.yAxis[0].max, 100);
+  assert.equal(built.tooltip.valueFormatter(75), "75 %");
+  // The other axis is not a share of anything, so it keeps its own unit.
+  assert.equal(built.yAxis[1].name, "n");
+  assert.equal(built.series[1].tooltip.valueFormatter(12), "12 n");
+  // And what the configuration says still wins.
+  assert.equal(option(TIME_ROWS, { stack_mode: "percent", y_max: 50 }).yAxis.max, 50);
+});
+
+test("asking for shares is asking to stack them", () => {
+  // The two settings could disagree; only one answer comes out.
+  assert.equal(option(TIME_ROWS, { stack_mode: "percent" }).series[0].stack, "total");
+  assert.equal(option(TIME_ROWS, { stacked: true }).series[0].stack, "total");
+  assert.equal(option(TIME_ROWS).series[0].stack, undefined);
+  // A stacked line is filled, whichever setting asked for the stacking.
+  assert.ok(option(TIME_ROWS, { stack_mode: "total" }).series[0].areaStyle);
+});
+
+test("a line across the chart is drawn against the axis it belongs to", () => {
+  // The first column is on the right; an average drawn there would be an
+  // average of something else.
+  const built = option(TIME_ROWS, { y2: "average", mark_average: true });
+
+  assert.equal(built.series[0].name, "average");
+  assert.equal(built.series[0].markLine, undefined, "the marks went to the right-hand axis");
+  assert.equal(built.series[1].name, "maximum");
+  assert.equal(built.series[1].markLine.data[0].type, "average");
+});
+
+test("a colour Home Assistant has a name for follows the theme", () => {
+  const theme = (name) => ({ red: "#f44336", primary: "#03a9f4" })[name] ?? "";
+
+  assert.equal(resolveColour("red", theme), "#f44336");
+  assert.equal(resolveColour("primary", theme), "#03a9f4");
+  // Anything already written as a colour is left alone.
+  assert.equal(resolveColour("#0072b2", theme), "#0072b2");
+  assert.equal(resolveColour("rgb(1,2,3)", theme), "rgb(1,2,3)");
+  // A name nothing answers for is handed over rather than dropped.
+  assert.equal(resolveColour("chartreuse", theme), "chartreuse");
+  assert.equal(resolveColour("red", undefined), "red", "no theme to ask");
+  assert.equal(resolveColour(""), "");
+});
+
+test("the series take their colour through the theme", () => {
+  const built = buildOption(
+    toChart(TIME_ROWS, "time", ["average"]),
+    { type: "custom:scribe-card", sql: "…", colors: ["red"] },
+    { ...THEME, colour: (name) => (name === "red" ? "#f44336" : "") },
+  );
+
+  assert.equal(built.series[0].itemStyle.color, "#f44336");
+  assert.equal(built.series[0].lineStyle.color, "#f44336");
 });

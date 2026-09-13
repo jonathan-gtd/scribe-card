@@ -44,9 +44,43 @@ export interface Theme {
   secondaryText: string;
   grid: string;
   background: string;
+  /** Turns a colour Home Assistant has a name for — `red`, `primary` — into
+   * the colour the current theme gives it. */
+  colour?: (name: string) => string;
+}
+
+/**
+ * A colour as ECharts needs it.
+ *
+ * Home Assistant names its colours, and a theme decides what they look like,
+ * so a card that says `red` follows the dashboard instead of being stuck at
+ * one particular red. Anything already written as a colour — a hex triple,
+ * `rgb(…)` — is left alone, and a name nothing answers for is handed over
+ * untouched rather than dropped.
+ */
+export function resolveColour(value: string, lookup?: (name: string) => string): string {
+  if (!value || /^(#|rgb|hsl|transparent)/i.test(value)) return value;
+  return lookup?.(value) || value;
 }
 
 type Dict = Record<string, unknown>;
+
+/**
+ * How the series are stacked, from the two settings that can say so.
+ *
+ * `stacked` came first and is a boolean; `stack_mode` came later and can also
+ * ask for shares. Stacking shares without stacking makes no sense, so naming a
+ * mode is asking to stack.
+ */
+export function stacking(config: ScribeCardConfig): "total" | "percent" | undefined {
+  return config.stack_mode ?? (config.stacked ? "total" : undefined);
+}
+
+/** The columns drawn against the right-hand axis, of those actually drawn. */
+export function rightHand(chart: Chart, config: ScribeCardConfig): string[] {
+  const asked = toList(config.y2);
+  return chart.series.map((one) => one.name).filter((name) => asked.includes(name));
+}
 
 /** One name or several, which is how every column option is written. */
 export function toList(value: string | string[] | undefined): string[] {
@@ -157,24 +191,28 @@ function seriesOption(
   theme: Theme,
 ): Dict {
   const colours = config.colors ?? PALETTE;
-  const colour = colours[index % colours.length];
+  const colour = resolveColour(colours[index % colours.length], theme.colour);
   const type = config.chart === "bar" ? "bar" : config.chart === "scatter" ? "scatter" : "line";
   // Stacked lines that are not filled read as a tangle: what is stacked is an
   // area, whatever it is called.
   const filled =
-    config.fill ?? (config.chart === "area" || (config.stacked === true && type === "line"));
+    config.fill ?? (config.chart === "area" || (stacking(config) !== undefined && type === "line"));
   // Past a few thousand points the canvas slows down and the drawing gains
   // nothing: LTTB keeps the shape of a line with far fewer of them.
   const crowded = chart.x.length > CROWDED;
   const symbol = config.symbol ?? "circle";
-  const marks = index === 0 ? markLines(config, theme) : undefined;
+  // On the first series left on the left-hand axis: an average drawn against
+  // the right-hand one is an average of something else entirely.
+  const right = rightHand(chart, config);
+  const firstLeft = chart.series.findIndex((one) => !right.includes(one.name));
+  const marks = index === firstLeft ? markLines(config, theme) : undefined;
 
   const base: Dict = {
     name: series.name,
     type,
     // A column named on the right-hand axis is drawn against it, and carries
     // that axis's unit into the tooltip: one unit for both would be a lie.
-    ...(toList(config.y2).includes(series.name)
+    ...(right.includes(series.name)
       ? {
           yAxisIndex: 1,
           tooltip: {
@@ -214,7 +252,7 @@ function seriesOption(
     ...(type === "scatter"
       ? { symbol: symbol === "none" ? "circle" : symbol, symbolSize: config.symbol_size ?? 10 }
       : {}),
-    ...(config.stacked || config.stack_mode ? { stack: "total" } : {}),
+    ...(stacking(config) ? { stack: "total" } : {}),
     ...(config.labels
       ? {
           label: {
@@ -233,7 +271,11 @@ function seriesOption(
 }
 
 export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme): Dict {
-  const unit = config.unit ?? "";
+  // What is drawn in percent mode is a share of each moment, so the unit the
+  // values were measured in is no longer what the axis carries.
+  const shares = stacking(config) === "percent";
+  const unit = shares ? "%" : (config.unit ?? "");
+  const right = rightHand(chart, config);
   const axisLine = { lineStyle: { color: theme.grid } };
   const splitLine = {
     show: config.split_lines ?? true,
@@ -259,15 +301,18 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
 
   /** One value axis, left or right. They differ only in where they sit. */
   const valueAxis = (side: "left" | "right"): Dict => {
-    const right = side === "right";
-    const name = right ? (config.y2_name ?? config.y2_unit) : (config.y_name ?? unit);
+    const onRight = side === "right";
+    const name = onRight ? (config.y2_name ?? config.y2_unit) : (config.y_name ?? unit);
+    // A share runs from nothing to everything, unless told otherwise.
+    const floor = shares && !onRight ? 0 : undefined;
+    const ceiling = shares && !onRight ? 100 : undefined;
     return {
-      type: (right ? config.y2_log : config.y_log) ? "log" : "value",
-      ...(right ? { position: "right" } : {}),
+      type: (onRight ? config.y2_log : config.y_log) ? "log" : "value",
+      ...(onRight ? { position: "right" } : {}),
       name: name || undefined,
       nameTextStyle: { color: theme.secondaryText },
-      min: orNothing(right ? config.y2_min : config.y_min),
-      max: orNothing(right ? config.y2_max : config.y_max),
+      min: orNothing(onRight ? config.y2_min : config.y_min) ?? floor,
+      max: orNothing(onRight ? config.y2_max : config.y_max) ?? ceiling,
       axisLine: { show: false },
       axisLabel: {
         color: theme.secondaryText,
@@ -275,7 +320,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
       },
       // Two sets of horizontal lines at different heights is a mess; only the
       // left axis draws them.
-      splitLine: right ? { show: false } : splitLine,
+      splitLine: onRight ? { show: false } : splitLine,
     };
   };
 
@@ -301,8 +346,9 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
       textStyle: { color: theme.secondaryText },
     },
     xAxis,
-    // A second axis only exists when something is drawn against it.
-    yAxis: toList(config.y2).length ? [valueAxis("left"), valueAxis("right")] : valueAxis("left"),
+    // A second axis only exists when something drawn actually goes to it: a
+    // `y2` naming a column the query no longer returns is an empty axis.
+    yAxis: right.length ? [valueAxis("left"), valueAxis("right")] : valueAxis("left"),
     series: chart.series.map((series, index) => seriesOption(series, index, chart, config, theme)),
     ...(config.zoom
       ? {

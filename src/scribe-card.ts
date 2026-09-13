@@ -25,7 +25,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import "./editor";
 import { echartsLocale } from "./locale";
-import { buildOption, resolveFormatters, type Theme } from "./option";
+import { buildOption, rightHand, resolveFormatters, stacking, type Theme } from "./option";
 import { fingerprint, read, readLocal, storageKey, write } from "./persist";
 import { runQuery } from "./query";
 import {
@@ -427,7 +427,14 @@ export class ScribeCard extends LitElement {
     let chart = toChart(this._rows, x, y, forced && forced !== "auto" ? forced : undefined);
     // Both are about the numbers rather than how they are drawn, so they
     // happen here and ECharts is handed the result.
-    if (this._config.stack_mode === "percent") chart = asPercentages(chart);
+    if (stacking(this._config) === "percent") {
+      // Only what shares the left-hand axis takes part in the share.
+      const right = rightHand(chart, this._config);
+      chart = asPercentages(
+        chart,
+        chart.series.map((one) => one.name).filter((name) => !right.includes(name)),
+      );
+    }
     if (this._config.sort && this._config.sort !== "none") {
       chart = sortCategories(chart, this._config.sort);
     }
@@ -463,6 +470,8 @@ export class ScribeCard extends LitElement {
       secondaryText: read("--secondary-text-color", "#727272"),
       grid: read("--divider-color", "rgba(127,127,127,.25)"),
       background: read("--ha-card-background", "transparent"),
+      // Home Assistant's own named colours, which a theme is free to redefine.
+      colour: (name) => read(`--${name}-color`, ""),
     };
   }
 

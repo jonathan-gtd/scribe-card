@@ -175,3 +175,15 @@ test("a chart of labels can be put in order of its values", () => {
   );
   assert.deepEqual(sortCategories(times, "desc").series[0].values, times.series[0].values);
 });
+
+test("a share is a share of what shares the axis", () => {
+  const rows = [{ time: "2026-09-12T10:00:00Z", a: 30, b: 10, hits: 960 }];
+  const chart = toChart(rows, "time", ["a", "b", "hits"]);
+
+  // `hits` is drawn against the other axis, so it is not part of the share —
+  // counted in, it would leave `a` and `b` at three per cent of nothing much.
+  const shares = asPercentages(chart, ["a", "b"]);
+  assert.deepEqual(shares.series[0].values, [75]);
+  assert.deepEqual(shares.series[1].values, [25]);
+  assert.deepEqual(shares.series[2].values, [960], "the other axis is untouched");
+});

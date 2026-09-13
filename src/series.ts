@@ -85,14 +85,20 @@ export function axisKind(rows: Row[], xColumn: string): AxisKind {
  * ECharts stacks what it is given; it has no notion of stacking proportions,
  * so the proportions are worked out here. A moment where everything is missing
  * stays missing rather than becoming a hundred per cent of nothing.
+ *
+ * `columns` narrows what counts towards the total, and what is rewritten;
+ * everything else is handed back untouched.
  */
-export function asPercentages(chart: Chart): Chart {
+export function asPercentages(chart: Chart, columns?: string[]): Chart {
   const series = chart.series.map((one) => ({ name: one.name, values: [...one.values] }));
+  // A series drawn against another axis is not a share of this one: a count
+  // and a temperature do not add up to anything.
+  const taking = columns ? series.filter((one) => columns.includes(one.name)) : series;
 
   chart.x.forEach((_, index) => {
     let total = 0;
-    for (const one of series) total += one.values[index] ?? 0;
-    for (const one of series) {
+    for (const one of taking) total += one.values[index] ?? 0;
+    for (const one of taking) {
       const value = one.values[index];
       one.values[index] = value === null || total === 0 ? null : (value / total) * 100;
     }

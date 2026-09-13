@@ -77,6 +77,21 @@ const DASHBOARD = {
                 FROM states WHERE entity_id = 'sensor.e2e_temperature'
                   AND time > now() - interval '48 hours' GROUP BY 1 ORDER BY 1`,
         },
+        {
+          type: "custom:scribe-card",
+          title: "Shares",
+          unit: "°C",
+          height: 200,
+          chart: "bar",
+          stack_mode: "percent",
+          y2: "releves",
+          y2_unit: "n",
+          colors: ["red", "blue"],
+          sql: `SELECT time_bucket('6 hours', time) AS time,
+                       avg(value) AS chaud, avg(value) / 2 AS froid, count(*) AS releves
+                FROM states WHERE entity_id = 'sensor.e2e_temperature'
+                  AND time > now() - interval '48 hours' GROUP BY 1 ORDER BY 1`,
+        },
       ],
     },
     {
@@ -109,8 +124,23 @@ async function check(name, body) {
   }
 }
 
-/** The card at a position in the first view, as Playwright pierces shadow DOM. */
-const card = (page, index) => page.locator("scribe-card").nth(index);
+/**
+ * The card with a given title.
+ *
+ * By title and not by position: a check that counts cards breaks the moment
+ * one is added, and breaks somewhere else entirely.
+ */
+async function card(page, title) {
+  const all = page.locator("scribe-card");
+  const found = [];
+  for (let index = 0; index < (await all.count()); index++) {
+    const one = all.nth(index);
+    const its = await one.evaluate((element) => element._config?.title);
+    if (its === title) return one;
+    found.push(its);
+  }
+  throw new Error(`no card titled ${title}; the page has ${JSON.stringify(found)}`);
+}
 
 const DASHBOARD_URL = `${BASE_URL}/e2e-cards`;
 
@@ -239,7 +269,9 @@ await page.waitForTimeout(1500);
 
 phase = "checks";
 await check("the card draws what the database returned", async () => {
-  const drawn = await card(page, 0).evaluate((element) => ({
+  const drawn = await (
+    await card(page, "Plain")
+  ).evaluate((element) => ({
     canvas: Boolean(element.shadowRoot.querySelector(".chart canvas")),
     label: element.shadowRoot.querySelector(".chart")?.getAttribute("aria-label"),
     rows: element.shadowRoot.querySelectorAll("table tbody tr").length,
@@ -250,7 +282,9 @@ await check("the card draws what the database returned", async () => {
 });
 
 await check("a query that fails says what the database said", async () => {
-  const shown = await card(page, 2).evaluate((element) => ({
+  const shown = await (
+    await card(page, "Broken")
+  ).evaluate((element) => ({
     error: Boolean(element.shadowRoot.querySelector(".error")),
     text: element.shadowRoot.textContent.replace(/\s+/g, " ").trim(),
   }));
@@ -266,7 +300,9 @@ await check("the axis is written in the language the instance is in", async () =
   assert.equal(locale.language, "fr", `the instance is in ${locale.language}, not French`);
 
   // ECharts draws to a canvas, so the proof is in the option it was given.
-  const labels = await card(page, 0).evaluate((element) => {
+  const labels = await (
+    await card(page, "Plain")
+  ).evaluate((element) => {
     const option = element._chart.getOption();
     const formatter = option.xAxis[0].axisLabel.formatter;
     return {
@@ -280,7 +316,7 @@ await check("the axis is written in the language the instance is in", async () =
 });
 
 await check("a range can be chosen, and the query follows it", async () => {
-  const ranged = card(page, 1);
+  const ranged = await card(page, "Ranged");
   await ranged.locator(".trigger").click();
   await page.waitForTimeout(200);
   await ranged.locator(".choice", { hasText: "Last 30 days" }).click();
@@ -310,9 +346,9 @@ await check("the chosen range outlives a reload, from the user store", async () 
   await page.locator("scribe-card").first().waitFor({ timeout: 30_000 });
   await page.waitForTimeout(2500);
 
-  const label = await card(page, 1).evaluate((element) =>
-    element.shadowRoot.querySelector(".trigger span")?.textContent.trim(),
-  );
+  const label = await (
+    await card(page, "Ranged")
+  ).evaluate((element) => element.shadowRoot.querySelector(".trigger span")?.textContent.trim());
   assert.equal(label, "Last 30 days", "the card forgot, with only the server to ask");
 });
 
@@ -339,7 +375,9 @@ await check("the editor finds the columns of a query with a range in it", async 
 });
 
 await check("two units in one chart get an axis each", async () => {
-  const drawn = await card(page, 3).evaluate((element) => {
+  const drawn = await (
+    await card(page, "Two axes")
+  ).evaluate((element) => {
     const option = element._chart.getOption();
     return {
       axes: option.yAxis.length,
@@ -357,6 +395,98 @@ await check("two units in one chart get an axis each", async () => {
   assert.deepEqual(drawn.onRight, ["releves"], "the wrong series went to the right");
   assert.equal(drawn.min, 0, "an axis told to start at zero did not");
   assert.deepEqual(drawn.lines, [true, false], "both axes drew their own lines across");
+});
+
+await check("shares are shares of the axis they are drawn against", async () => {
+  const drawn = await (
+    await card(page, "Shares")
+  ).evaluate((element) => {
+    const option = element._chart.getOption();
+    const series = Object.fromEntries(option.series.map((one) => [one.name, one]));
+    const at = (one) => one.data.at(-1)[1] ?? one.data.at(-1);
+    return {
+      left: option.yAxis[0],
+      rightName: option.yAxis[1]?.name,
+      shares: at(series.chaud) + at(series.froid),
+      counted: at(series.releves),
+      onRight: series.releves.yAxisIndex,
+      colour: series.chaud.itemStyle.color,
+    };
+  });
+
+  assert.equal(drawn.left.name, "%", "the axis of shares still claimed degrees");
+  assert.deepEqual([drawn.left.min, drawn.left.max], [0, 100]);
+  // The two columns on the left are the whole of it. The count on the right is
+  // not part of any share — and had it been normalised with them, all three
+  // would come to a hundred instead of the two.
+  assert.ok(Math.abs(drawn.shares - 100) < 0.001, `the shares came to ${drawn.shares}`);
+  assert.ok(
+    drawn.shares + drawn.counted > 100.5,
+    `all three came to ${drawn.shares + drawn.counted}: the count was normalised too`,
+  );
+  assert.equal(drawn.onRight, 1);
+  assert.equal(drawn.rightName, "n");
+  // A colour Home Assistant has a name for, resolved against the live theme.
+  assert.match(drawn.colour, /^#[0-9a-f]{6}$/i, `colour came through as ${drawn.colour}`);
+});
+
+await check("colours are picked from the theme, one per drawn series", async () => {
+  const seen = await page.evaluate(async () => {
+    const hass = document.querySelector("home-assistant").hass;
+    const editor = document.createElement("scribe-card-editor");
+    editor.hass = hass;
+    editor.setConfig({
+      type: "custom:scribe-card",
+      colors: ["red"],
+      sql: `SELECT time_bucket('1 hour', time) AS time, avg(value) AS moyenne,
+                   max(value) AS maximum
+            FROM states WHERE entity_id = 'sensor.e2e_temperature'
+              AND time > now() - interval '24 hours' GROUP BY 1 ORDER BY 1`,
+    });
+    document.body.append(editor);
+    await editor.updateComplete;
+    await new Promise((done) => setTimeout(done, 2600));
+    await editor.updateComplete;
+
+    // Onto the Chart tab, and open every section on it.
+    editor.shadowRoot.querySelectorAll(".tab")[1].click();
+    await editor.updateComplete;
+    await new Promise((done) => setTimeout(done, 400));
+
+    const deep = (root, selector) => {
+      const found = [];
+      const walk = (node) => {
+        found.push(...node.querySelectorAll(selector));
+        for (const element of node.querySelectorAll("*"))
+          if (element.shadowRoot) walk(element.shadowRoot);
+      };
+      walk(root);
+      return found;
+    };
+    for (const panel of deep(editor.shadowRoot, "ha-expansion-panel")) panel.expanded = true;
+    await editor.updateComplete;
+    await new Promise((done) => setTimeout(done, 400));
+
+    const pickers = deep(editor.shadowRoot, "ha-color-picker");
+    const seen = {
+      pickers: pickers.length,
+      labels: pickers.map((one) => one.label),
+      values: pickers.map((one) => one.value ?? ""),
+      text: editor.shadowRoot.textContent,
+    };
+    editor.remove();
+    return seen;
+  });
+
+  assert.equal(seen.pickers, 2, "one colour picker per drawn series");
+  assert.deepEqual(seen.labels, ["Colour of moyenne", "Colour of maximum"]);
+  assert.equal(seen.values[0], "red", "what the configuration says is what is shown");
+  // The x column is not drawn, so it gets no colour of its own.
+  assert.equal(
+    seen.labels.some((one) => one.includes("time")),
+    false,
+  );
+  assert.doesNotMatch(seen.text, /#[0-9a-f]{6}/i, "hexadecimal is still being shown");
 });
 
 await check("the editor is in tabs, and each one shows its own fields", async () => {

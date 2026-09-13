@@ -146,3 +146,65 @@ test("the ranges and the colours are offered, not imposed", () => {
   // "24h" is a range anyone would want, and "1 day" is not one at all.
   assert.ok(byName.ranges.selector.select.options.some((option) => option.value === "24h"));
 });
+
+test("colours are picked, not typed in hexadecimal", () => {
+  // Before the query has run there are no columns to name, so a list is all
+  // there is to offer.
+  const blind = fields(editorSchema()).find((one) => one.name === "colors");
+  assert.ok(blind, "nothing offered for colours at all");
+
+  // The columns the query returned are not the columns that get a colour:
+  // `colors` runs in the order the series are drawn, and `time` is the axis.
+  const known = fields(editorSchema(["time", "moyenne", "maximum"], ["moyenne", "maximum"]));
+  const pickers = known.filter((one) => one.selector?.ui_color);
+  assert.equal(pickers.length, 2, "one picker per drawn series, not per column");
+  assert.deepEqual(
+    pickers.map((one) => one.label),
+    ["Colour of moyenne", "Colour of maximum"],
+  );
+  assert.equal(
+    known.some((one) => one.name === "colors"),
+    false,
+    "the hexadecimal list is still there beside the pickers",
+  );
+  // Knowing the columns is not enough; nothing is drawn until the rows say so.
+  assert.ok(fields(editorSchema(["time", "moyenne"])).some((one) => one.name === "colors"));
+});
+
+test("what is picked lands in the list the card reads", () => {
+  const columns = ["a", "b", "c"];
+
+  // Out of the configuration and into the fields.
+  assert.deepEqual(formData({ colors: ["red", "blue"] }, columns), {
+    ...formData({ colors: ["red", "blue"] }, columns),
+    color_0: "red",
+    color_1: "blue",
+    color_2: "",
+  });
+
+  // And back, in order.
+  const saved = cleanConfig(
+    { sql: "…", color_0: "red", color_1: "none", color_2: "blue" },
+    columns,
+  );
+  assert.deepEqual(saved.colors, ["red", "", "blue"], "`none` is a slot left to the palette");
+
+  // Nothing picked at all is no list, rather than a list of nothings.
+  assert.equal(cleanConfig({ sql: "…", color_0: "", color_1: "" }, columns).colors, undefined);
+  // And the fields themselves are never written to the configuration.
+  assert.equal("color_0" in saved, false);
+});
+
+test("stacking is one question with three answers, not two that can disagree", () => {
+  // `stacked` came first; a card written with it still reads correctly.
+  assert.equal(formData({ stacked: true }).stack_mode, "total");
+  assert.equal(formData({}).stack_mode, "off");
+  assert.equal(formData({ stack_mode: "percent" }).stack_mode, "percent");
+  assert.equal("stacked" in formData({ stacked: true }), false, "the old setting is not shown");
+
+  // And saving writes the one setting, never both.
+  const saved = cleanConfig({ sql: "…", stacked: true, stack_mode: "percent" });
+  assert.equal(saved.stack_mode, "percent");
+  assert.equal("stacked" in saved, false);
+  assert.equal("stack_mode" in cleanConfig({ sql: "…", stack_mode: "off" }), false);
+});
