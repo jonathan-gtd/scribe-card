@@ -24,6 +24,9 @@ function open(values: string[], multiple = true): Schema["selector"] {
 
 export interface Schema {
   name: string;
+  /** For a field the schema builds rather than names in advance, such as one
+   * colour picker per column the query returned. */
+  label?: string;
   type?: string;
   /** `expandable` and `grid` nest their values under `name` unless told not
    * to; the card's configuration is flat and stays that way. */
@@ -40,6 +43,29 @@ export interface Tab {
   label: string;
   icon: string;
   schema: Schema[];
+}
+
+/** The prefix of the per-column colour fields, which exist only in the form. */
+const COLOUR = "color_";
+
+/**
+ * One colour picker per column the query returned.
+ *
+ * A list of hexadecimal codes asks someone to read `#0072b2` and to know which
+ * series is third. Home Assistant's own colour picker asks for a colour, and
+ * the column it belongs to is written on it. Before the query has run there
+ * are no columns to offer, so the list is all there is.
+ *
+ * `drawn` and not every column the query returned: `colors` runs in the order
+ * the series are drawn, and the column on the x axis is not one of them.
+ */
+function colourFields(drawn: string[]): Schema[] {
+  if (!drawn.length) return [{ name: "colors", selector: open(PALETTE) }];
+  return drawn.map((column, index) => ({
+    name: `${COLOUR}${index}`,
+    label: `Colour of ${column}`,
+    selector: { ui_color: { include_none: true } },
+  }));
 }
 
 /** A number nobody has to type units into. */
@@ -86,7 +112,7 @@ function column(name: string, columns: string[], multiple = false): Schema {
  * the editor offers them for the axes rather than asking someone to retype a
  * name they already wrote in the SQL.
  */
-export function editorTabs(columns: string[] = []): Tab[] {
+export function editorTabs(columns: string[] = [], drawn: string[] = []): Tab[] {
   return [
     {
       id: "query",
@@ -174,15 +200,17 @@ export function editorTabs(columns: string[] = []): Tab[] {
             // A switch to a row: see the note above this function.
             { name: "fill", selector: { boolean: {} } },
             { name: "smooth", selector: { boolean: {} } },
-            { name: "stacked", selector: { boolean: {} } },
             {
+              // One control, not two that can disagree: stacking shares
+              // without stacking makes no sense.
               name: "stack_mode",
               selector: {
                 select: {
                   mode: "dropdown",
                   options: [
-                    { value: "total", label: "Their values" },
-                    { value: "percent", label: "Their share, out of a hundred" },
+                    { value: "off", label: "Not stacked" },
+                    { value: "total", label: "Stacked, by value" },
+                    { value: "percent", label: "Stacked, by share of each moment" },
                   ],
                 },
               },
@@ -218,8 +246,15 @@ export function editorTabs(columns: string[] = []): Tab[] {
             },
             { name: "connect_nulls", selector: { boolean: {} } },
             { name: "bar_width", selector: { text: {} } },
-            { name: "colors", selector: open(PALETTE) },
           ],
+        },
+        {
+          name: "palette",
+          type: "expandable",
+          flatten: true,
+          title: "Colours",
+          icon: "mdi:palette",
+          schema: colourFields(drawn),
         },
         {
           name: "marks",
@@ -246,6 +281,21 @@ export function editorTabs(columns: string[] = []): Tab[] {
           icon: "mdi:magnify",
           schema: [
             { name: "labels", selector: { boolean: {} } },
+            {
+              name: "label_position",
+              selector: {
+                select: {
+                  mode: "dropdown",
+                  options: [
+                    { value: "top", label: "Above" },
+                    { value: "bottom", label: "Below" },
+                    { value: "inside", label: "Inside" },
+                    { value: "left", label: "Left" },
+                    { value: "right", label: "Right" },
+                  ],
+                },
+              },
+            },
             {
               name: "",
               type: "grid",
@@ -410,8 +460,8 @@ export function editorTabs(columns: string[] = []): Tab[] {
 }
 
 /** Every field of every tab, which is what the card is configured by. */
-export function editorSchema(columns: string[] = []): Schema[] {
-  return editorTabs(columns).flatMap((tab) => tab.schema);
+export function editorSchema(columns: string[] = [], drawn: string[] = []): Schema[] {
+  return editorTabs(columns, drawn).flatMap((tab) => tab.schema);
 }
 
 /** What each field is called in the form. */
@@ -425,7 +475,6 @@ export const LABELS: Record<string, string> = {
   height: "Height",
   refresh_interval: "Refresh every",
   zoom: "Zoom",
-  stacked: "Stacked",
   fill: "Filled",
   smooth: "Smooth line",
   step: "Steps",
@@ -463,7 +512,7 @@ export const LABELS: Record<string, string> = {
   stack_mode: "Stack",
   sort: "Order",
   labels: "Write the values",
-  label_position: "Where",
+  label_position: "Written",
   mark_average: "The average",
   mark_max: "The highest",
   mark_min: "The lowest",
@@ -494,7 +543,8 @@ export const HELPERS: Record<string, string> = {
   opacity: "From 0 to 1. Only where something is filled.",
   connect_nulls: "A sensor that reported nothing did not report zero — join it anyway.",
   bar_width: "In pixels, or a percentage such as 60%.",
-  stack_mode: "Only where the series are stacked.",
+  stack_mode: "Shares are worked out across the columns on the left-hand axis only.",
+  label_position: "Only where the values are written.",
   sort: "Only a chart of labels; a chart of times is already in order.",
   mark_average: "Drawn from the first column. Several averages is several lines.",
   threshold: "A limit, or a target. Left empty, no line.",
@@ -508,7 +558,7 @@ export const HELPERS: Record<string, string> = {
  * into the YAML would bury the two lines that matter under a dozen defaults.
  * So anything empty, and anything that is already the default, is dropped.
  */
-export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
+export function cleanConfig(data: Record<string, unknown>, drawn: string[] = []): ScribeCardConfig {
   const DEFAULTS: Record<string, unknown> = {
     chart: "line",
     height: 250,
@@ -535,9 +585,14 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
 
   const config: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
+    // The per-column pickers are gathered back into the list below.
+    if (key.startsWith(COLOUR)) continue;
     if (value === undefined || value === null || value === "") continue;
     if (Array.isArray(value) && value.length === 0) continue;
     // The legend has three answers and the configuration has two, plus absent.
+    // Stacking has one setting now, and "off" is the absence of it.
+    if (key === "stacked") continue;
+    if (key === "stack_mode" && value === "off") continue;
     if (key === "legend") {
       if (value !== "always" && value !== "never") continue;
       config.legend = value === "always";
@@ -548,6 +603,18 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
     const single = (key === "y" || key === "y2") && Array.isArray(value) && value.length === 1;
     config[key] = single ? (value as unknown[])[0] : value;
   }
+  if (drawn.length) {
+    // `none` is someone saying "whatever the palette says", which is an empty
+    // slot; trailing empty slots are not worth writing down at all.
+    const chosen = drawn.map((_, index) => {
+      const picked = data[`${COLOUR}${index}`];
+      return typeof picked === "string" && picked && picked !== "none" ? picked : "";
+    });
+    while (chosen.length && chosen[chosen.length - 1] === "") chosen.pop();
+    if (chosen.length) config.colors = chosen;
+    else delete config.colors;
+  }
+
   config.type = data.type ?? "custom:scribe-card";
   return config as unknown as ScribeCardConfig;
 }
@@ -560,8 +627,13 @@ export function cleanConfig(data: Record<string, unknown>): ScribeCardConfig {
  * default is neither shown nor hidden, and a single column is written as
  * itself where the field expects a list of them.
  */
-export function formData(config: Partial<ScribeCardConfig>): Record<string, unknown> {
-  const { legend, y, y2, ...rest } = config;
+export function formData(
+  config: Partial<ScribeCardConfig>,
+  drawn: string[] = [],
+): Record<string, unknown> {
+  const { legend, y, y2, stacked, ...rest } = config;
+  void stacked;
+  const colours = config.colors ?? [];
   const asList = (value: string | string[] | undefined) =>
     value === undefined ? {} : { list: Array.isArray(value) ? value : [value] };
   return {
@@ -572,5 +644,9 @@ export function formData(config: Partial<ScribeCardConfig>): Record<string, unkn
     // Two more whose default is not what an unticked box means.
     export: config.export ?? true,
     split_lines: config.split_lines ?? true,
+    // `stacked` said the same thing in fewer words; the form shows one answer.
+    stack_mode: config.stack_mode ?? (config.stacked ? "total" : "off"),
+    // One field per column, out of the list the configuration keeps.
+    ...Object.fromEntries(drawn.map((_, index) => [`${COLOUR}${index}`, colours[index] ?? ""])),
   };
 }

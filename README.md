@@ -56,44 +56,44 @@ The card draws the rows the query returns. It puts the first column that looks l
 
 The form covers these; `options:` and `series:` are for the code editor.
 
-| Option             | Type                             | Default                                       | What it does                                                      |
-| ------------------ | -------------------------------- | --------------------------------------------- | ----------------------------------------------------------------- |
-| `sql`              | string                           | **required**                                  | The query to run.                                                 |
-| `title`            | string                           | —                                             | Card header.                                                      |
-| `chart`            | `line`, `area`, `bar`, `scatter` | `line`                                        | How to draw the series.                                           |
-| `x`                | string                           | the first time-looking column, else the first | Column for the x axis.                                            |
-| `y`                | string or list                   | every numeric column besides `x`              | Columns to draw.                                                  |
-| `unit`             | string                           | —                                             | Names the y axis, and follows the values in the tooltip.          |
-| `height`           | number                           | `250`                                         | Chart height, in pixels.                                          |
-| `refresh_interval` | number                           | `0`                                           | Seconds between refreshes. `0` queries once, when the card loads. |
-| `colors`           | list                             | a colour-blind-safe palette                   | Colours, in series order.                                         |
-| `legend`           | boolean                          | shown when there are several series           | Show the legend.                                                  |
-| `stacked`          | boolean                          | `false`                                       | Stack the series on top of each other.                            |
-| `fill`             | boolean                          | `false`                                       | Fill under the line — `chart: area` says the same.                |
-| `smooth`           | boolean                          | `false`                                       | Curve the line instead of joining the points straight.            |
-| `step`             | `start`, `middle`, `end`         | —                                             | Draw as steps, which is what a thermostat really does.            |
-| `zoom`             | boolean                          | `false`                                       | Drag to zoom, with a scrollbar under the chart.                   |
-| `ranges`           | list                             | seven, from `1h` to `1y`                      | Time ranges to offer. Needs `$__from`, `$__to` or `$__interval`.  |
-| `storage_key`      | string                           | the query itself                              | What the chosen range is remembered under.                        |
-| `export`           | boolean                          | `true`                                        | Offer the rows as a CSV file, wherever the toolbar shows.         |
-| `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.            |
-| `series`           | object                           | —                                             | **ECharts series options**, by column name.                       |
+| Option             | Type                             | Default                                       | What it does                                                                                                                                             |
+| ------------------ | -------------------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sql`              | string                           | **required**                                  | The query to run.                                                                                                                                        |
+| `title`            | string                           | —                                             | Card header.                                                                                                                                             |
+| `chart`            | `line`, `area`, `bar`, `scatter` | `line`                                        | How to draw the series.                                                                                                                                  |
+| `x`                | string                           | the first time-looking column, else the first | Column for the x axis.                                                                                                                                   |
+| `y`                | string or list                   | every numeric column besides `x`              | Columns to draw.                                                                                                                                         |
+| `unit`             | string                           | —                                             | Names the y axis, and follows the values in the tooltip.                                                                                                 |
+| `height`           | number                           | `250`                                         | Chart height, in pixels.                                                                                                                                 |
+| `refresh_interval` | number                           | `0`                                           | Seconds between refreshes. `0` queries once, when the card loads.                                                                                        |
+| `colors`           | list                             | a colour-blind-safe palette                   | Colours, in the order the series are drawn. A colour Home Assistant has a name for — `red`, `primary` — follows your theme; `#0072b2` is taken as it is. |
+| `legend`           | boolean                          | shown when there are several series           | Show the legend.                                                                                                                                         |
+| `stacked`          | boolean                          | `false`                                       | Stack the series. `stack_mode` says the same and more; this spelling still works.                                                                        |
+| `fill`             | boolean                          | `false`                                       | Fill under the line — `chart: area` says the same.                                                                                                       |
+| `smooth`           | boolean                          | `false`                                       | Curve the line instead of joining the points straight.                                                                                                   |
+| `step`             | `start`, `middle`, `end`         | —                                             | Draw as steps, which is what a thermostat really does.                                                                                                   |
+| `zoom`             | boolean                          | `false`                                       | Drag to zoom, with a scrollbar under the chart.                                                                                                          |
+| `ranges`           | list                             | seven, from `1h` to `1y`                      | Time ranges to offer. Needs `$__from`, `$__to` or `$__interval`.                                                                                         |
+| `storage_key`      | string                           | the query itself                              | What the chosen range is remembered under.                                                                                                               |
+| `export`           | boolean                          | `true`                                        | Offer the rows as a CSV file, wherever the toolbar shows.                                                                                                |
+| `options`          | object                           | —                                             | **ECharts options**, merged over what the card builds.                                                                                                   |
+| `series`           | object                           | —                                             | **ECharts series options**, by column name.                                                                                                              |
 
 ### How the series are drawn
 
-| Option           | Type                                                           | Default | What it does                                             |
-| ---------------- | -------------------------------------------------------------- | ------- | -------------------------------------------------------- |
-| `line_width`     | number                                                         | `2`     | Thickness of the line, in pixels.                        |
-| `opacity`        | number                                                         | `0.18`  | How solid the fill under a line is, from 0 to 1.         |
-| `gradient`       | boolean                                                        | `false` | Fade the fill towards the bottom instead of a flat wash. |
-| `symbol`         | `none`, `circle`, `emptyCircle`, `rect`, `triangle`, `diamond` | —       | A mark on every point.                                   |
-| `symbol_size`    | number                                                         | `6`     | How big that mark is.                                    |
-| `connect_nulls`  | boolean                                                        | `false` | Join across gaps instead of leaving the line broken.     |
-| `bar_width`      | number or string                                               | —       | Bar thickness, in pixels or as `60%`.                    |
-| `stack_mode`     | `total`, `percent`                                             | `total` | Stack the values, or their share of each moment.         |
-| `sort`           | `none`, `asc`, `desc`                                          | `none`  | Order a chart of labels by its first drawn column.       |
-| `labels`         | boolean                                                        | `false` | Write the value beside each point.                       |
-| `label_position` | string                                                         | `top`   | Where, in ECharts' own words.                            |
+| Option           | Type                                                           | Default | What it does                                                                                                                                                                                                |
+| ---------------- | -------------------------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `line_width`     | number                                                         | `2`     | Thickness of the line, in pixels.                                                                                                                                                                           |
+| `opacity`        | number                                                         | `0.18`  | How solid the fill under a line is, from 0 to 1.                                                                                                                                                            |
+| `gradient`       | boolean                                                        | `false` | Fade the fill towards the bottom instead of a flat wash.                                                                                                                                                    |
+| `symbol`         | `none`, `circle`, `emptyCircle`, `rect`, `triangle`, `diamond` | —       | A mark on every point.                                                                                                                                                                                      |
+| `symbol_size`    | number                                                         | `6`     | How big that mark is.                                                                                                                                                                                       |
+| `connect_nulls`  | boolean                                                        | `false` | Join across gaps instead of leaving the line broken.                                                                                                                                                        |
+| `bar_width`      | number or string                                               | —       | Bar thickness, in pixels or as `60%`.                                                                                                                                                                       |
+| `stack_mode`     | `total`, `percent`                                             | —       | Stack the values, or their share of each moment. Asking for either is asking to stack. Shares are worked out across the columns on the **left-hand axis only**, and that axis then reads `%` from 0 to 100. |
+| `sort`           | `none`, `asc`, `desc`                                          | `none`  | Order a chart of labels by its first drawn column.                                                                                                                                                          |
+| `labels`         | boolean                                                        | `false` | Write the value beside each point.                                                                                                                                                                          |
+| `label_position` | string                                                         | `top`   | Where, in ECharts' own words.                                                                                                                                                                               |
 
 ### Lines across the chart
 

@@ -15,7 +15,8 @@ import { customElement, property, state } from "lit/decorators.js";
 import { cleanConfig, editorTabs, formData, HELPERS, LABELS, type Schema } from "./editor-schema";
 import { runQuery } from "./query";
 import { defaultRange, substitute } from "./range";
-import type { HomeAssistant, ScribeCardConfig } from "./types";
+import { pickXColumn, pickYColumns } from "./series";
+import type { HomeAssistant, Row, ScribeCardConfig } from "./types";
 
 /** Long enough that the columns are not looked up on every keystroke. */
 const SETTLE_MS = 900;
@@ -26,6 +27,9 @@ export class ScribeCardEditor extends LitElement {
 
   @state() private _config: Partial<ScribeCardConfig> = {};
   @state() private _columns: string[] = [];
+  /** The rows the column list came from, kept so the editor can tell which
+   * columns are actually drawn — which is the order `colors` runs in. */
+  @state() private _rows: Row[] = [];
   @state() private _queryError?: string;
   @state() private _tab = "query";
 
@@ -59,6 +63,7 @@ export class ScribeCardEditor extends LitElement {
       // the preview beside this form draws perfectly well.
       const asked = substitute(sql, defaultRange(this._config.ranges), Date.now());
       const rows = await runQuery(this.hass, asked);
+      this._rows = rows;
       this._columns = rows.length ? Object.keys(rows[0]) : [];
       this._queryError = undefined;
     } catch (error: unknown) {
@@ -66,12 +71,24 @@ export class ScribeCardEditor extends LitElement {
       // way, and a half-typed query failing is normal.
       this._queryError = error instanceof Error ? error.message : String(error);
       this._columns = [];
+      this._rows = [];
     }
+  }
+
+  /** The columns the card will actually draw, in the order it draws them —
+   * the same two rules the card itself uses, so the two cannot disagree. */
+  private _drawn(): string[] {
+    if (!this._rows.length) return [];
+    const x = pickXColumn(this._columns, this._config.x);
+    return pickYColumns(this._rows, x, this._config.y);
   }
 
   private _valueChanged(event: CustomEvent): void {
     event.stopPropagation();
-    const config = cleanConfig({ ...(event.detail.value as Record<string, unknown>) });
+    const config = cleanConfig(
+      { ...(event.detail.value as Record<string, unknown>) },
+      this._drawn(),
+    );
     this._config = config;
     this._scheduleColumns();
     this.dispatchEvent(
@@ -83,13 +100,15 @@ export class ScribeCardEditor extends LitElement {
     );
   }
 
-  private _label = (schema: Schema): string => LABELS[schema.name] ?? schema.name;
+  // A field the schema built rather than named in advance — one colour picker
+  // per column — carries its own label.
+  private _label = (schema: Schema): string => schema.label ?? LABELS[schema.name] ?? schema.name;
   private _helper = (schema: Schema): string | undefined => HELPERS[schema.name];
 
   protected override render(): TemplateResult {
     if (!this.hass) return html``;
 
-    const tabs = editorTabs(this._columns);
+    const tabs = editorTabs(this._columns, this._drawn());
     const current = tabs.find((tab) => tab.id === this._tab) ?? tabs[0];
 
     return html`
@@ -113,7 +132,7 @@ export class ScribeCardEditor extends LitElement {
 
       <ha-form
         .hass=${this.hass}
-        .data=${formData(this._config)}
+        .data=${formData(this._config, this._drawn())}
         .schema=${current.schema}
         .computeLabel=${this._label}
         .computeHelper=${this._helper}
