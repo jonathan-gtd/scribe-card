@@ -125,6 +125,53 @@ function legendPlace(where: string): Dict {
   }
 }
 
+/**
+ * Colour taken from the value rather than from the series.
+ *
+ * Two shapes, and a threshold wins over a range: past a limit the line turns a
+ * colour, or it runs through a gradient between two values. On the first column
+ * left on the left-hand axis, like the lines across the chart — a gradient over
+ * several series would leave nothing to tell them apart by.
+ */
+function colourByValue(chart: Chart, config: ScribeCardConfig, theme: Theme): Dict | undefined {
+  const right = rightHand(chart, config);
+  const index = chart.series.findIndex((one) => !right.includes(one.name));
+  if (index < 0) return undefined;
+
+  const colours = config.colors ?? PALETTE;
+  const base = resolveColour(colours[index % colours.length], theme.colour);
+  const common = { show: false, seriesIndex: index, outOfRange: { color: base } };
+
+  const above = orNothing(config.warn_above);
+  const below = orNothing(config.warn_below);
+  if (above !== undefined || below !== undefined) {
+    const warn = resolveColour(config.warn_color ?? "red", theme.colour);
+    return {
+      ...common,
+      type: "piecewise",
+      pieces: [
+        ...(below !== undefined ? [{ lt: below, color: warn }] : []),
+        ...(above !== undefined ? [{ gt: above, color: warn }] : []),
+      ],
+    };
+  }
+
+  const from = orNothing(config.scale_from);
+  const to = orNothing(config.scale_to);
+  if (from === undefined || to === undefined || to <= from) return undefined;
+  return {
+    ...common,
+    type: "continuous",
+    min: from,
+    max: to,
+    inRange: {
+      color: (config.scale_colors ?? ["blue", "red"]).map((one) =>
+        resolveColour(one, theme.colour),
+      ),
+    },
+  };
+}
+
 /** Room around the chart. The slider under a zoomable chart needs its own. */
 function margins(config: ScribeCardConfig, zoomed: boolean): Dict {
   return {
@@ -273,6 +320,7 @@ function seriesOption(
 export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme): Dict {
   // What is drawn in percent mode is a share of each moment, so the unit the
   // values were measured in is no longer what the axis carries.
+  const byValue = colourByValue(chart, config, theme);
   const shares = stacking(config) === "percent";
   const unit = shares ? "%" : (config.unit ?? "");
   const right = rightHand(chart, config);
@@ -350,6 +398,7 @@ export function buildOption(chart: Chart, config: ScribeCardConfig, theme: Theme
     // `y2` naming a column the query no longer returns is an empty axis.
     yAxis: right.length ? [valueAxis("left"), valueAxis("right")] : valueAxis("left"),
     series: chart.series.map((series, index) => seriesOption(series, index, chart, config, theme)),
+    ...(byValue ? { visualMap: byValue } : {}),
     ...(config.zoom
       ? {
           // Drag to zoom, wheel to scale — what makes a long history readable.

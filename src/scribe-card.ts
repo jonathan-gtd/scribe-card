@@ -17,6 +17,7 @@ import {
   LegendComponent,
   MarkLineComponent,
   TooltipComponent,
+  VisualMapComponent,
 } from "echarts/components";
 import * as echarts from "echarts/core";
 import { CanvasRenderer } from "echarts/renderers";
@@ -60,6 +61,7 @@ echarts.use([
   LegendComponent,
   DataZoomComponent,
   MarkLineComponent,
+  VisualMapComponent,
   CanvasRenderer,
 ]);
 
@@ -186,6 +188,10 @@ export class ScribeCard extends LitElement {
       "opacity",
       "symbol_size",
       "threshold",
+      "warn_above",
+      "warn_below",
+      "scale_from",
+      "scale_to",
     ] as const) {
       const value = config[key];
       if (value !== undefined && (typeof value !== "number" || !Number.isFinite(value))) {
@@ -195,8 +201,10 @@ export class ScribeCard extends LitElement {
     if (config.y !== undefined && typeof config.y !== "string" && !Array.isArray(config.y)) {
       throw new Error("scribe-card: `y` must be a column name or a list of them");
     }
-    if (config.colors !== undefined && !Array.isArray(config.colors)) {
-      throw new Error("scribe-card: `colors` must be a list");
+    for (const key of ["colors", "scale_colors"] as const) {
+      if (config[key] !== undefined && !Array.isArray(config[key])) {
+        throw new Error(`scribe-card: \`${key}\` must be a list`);
+      }
     }
     if (config.ranges !== undefined) {
       if (!Array.isArray(config.ranges)) throw new Error("scribe-card: `ranges` must be a list");

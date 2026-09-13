@@ -156,7 +156,8 @@ test("colours are picked, not typed in hexadecimal", () => {
   // The columns the query returned are not the columns that get a colour:
   // `colors` runs in the order the series are drawn, and `time` is the axis.
   const known = fields(editorSchema(["time", "moyenne", "maximum"], ["moyenne", "maximum"]));
-  const pickers = known.filter((one) => one.selector?.ui_color);
+  // The per-column pickers, not every colour the form offers.
+  const pickers = known.filter((one) => one.label?.startsWith("Colour of"));
   assert.equal(pickers.length, 2, "one picker per drawn series, not per column");
   assert.deepEqual(
     pickers.map((one) => one.label),

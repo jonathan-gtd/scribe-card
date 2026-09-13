@@ -95,6 +95,35 @@ The form covers these; `options:` and `series:` are for the code editor.
 | `labels`         | boolean                                                        | `false` | Write the value beside each point.                                                                                                                                                                          |
 | `label_position` | string                                                         | `top`   | Where, in ECharts' own words.                                                                                                                                                                               |
 
+### Colour by value
+
+The first drawn column can take its colour from the value rather than from the series — a line
+that turns red past a limit, or a gradient from cold to hot.
+
+| Option         | Type   | Default     | What it does                                                |
+| -------------- | ------ | ----------- | ----------------------------------------------------------- |
+| `warn_above`   | number | —           | Past this value, the column is drawn in the warning colour. |
+| `warn_below`   | number | —           | And below this one — freezing, a battery running out.       |
+| `warn_color`   | string | `red`       | What past the limit looks like.                             |
+| `scale_from`   | number | —           | A gradient across a range of values instead.                |
+| `scale_to`     | number | —           | The other end of it.                                        |
+| `scale_colors` | list   | blue to red | The colours it runs through, coldest first.                 |
+
+A limit wins over a range, and either applies to the first column left on the **left-hand axis** —
+a gradient across several series would leave nothing to tell them apart by.
+
+```yaml
+type: custom:scribe-card
+title: Outside temperature
+unit: °C
+warn_above: 30
+sql: >
+  SELECT time_bucket('1 hour', time) AS time, avg(value) AS temperature
+  FROM states WHERE entity_id = 'sensor.outside_temperature'
+    AND time > now() - interval '48 hours'
+  GROUP BY 1 ORDER BY 1
+```
+
 ### Lines across the chart
 
 | Option                                   | Type    | Default | What it does                                                    |
@@ -245,7 +274,7 @@ The tables and views these queries use are described in [Scribe's data structure
 
 ## Good to know
 
-- **The card weighs 645 KB** (217 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
+- **The card weighs 683 KB** (229 KB over the wire), nearly all of it ECharts, and only the line, bar and scatter charts are bundled. For comparison, `apexcharts-card` is about 1.6 MB.
 
 - **A crowded chart is drawn differently.** Past a few thousand points a line is downsampled with
   LTTB, which keeps the shape of the curve and not the cost of drawing every point of it.

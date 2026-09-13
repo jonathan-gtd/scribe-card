@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+**Colour from the value.** `warn_above` draws the first column in a warning colour past a limit,
+`warn_below` under one, and `scale_from` / `scale_to` run it through a gradient instead. ECharts'
+`visualMap` is now bundled, which it never was — an `options: { visualMap: … }` written by hand did
+nothing at all before this. It costs 38 KB, 12 of them over the wire.
+
+**Colours are picked, not typed.** The editor shows one of Home Assistant's colour pickers per
+drawn series, and a colour it has a name for — `red`, `primary` — follows the theme rather than
+being fixed. Hexadecimal is still accepted.
+
+Fixed: shares counted the series on the right-hand axis; a chart of shares kept the unit of the
+values it no longer showed; two settings could disagree about stacking; a `y2` naming a column
+that is not drawn raised an axis for it; lines across the chart landed on the right-hand axis when
+the first column belonged to it; `label_position` was documented and unreachable.
+
 ## 0.4.0
 
 **One card, several time ranges.** A query can leave its period out — `$__from`, `$__to` and

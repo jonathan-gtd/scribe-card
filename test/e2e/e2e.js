@@ -467,7 +467,11 @@ await check("colours are picked from the theme, one per drawn series", async () 
     await editor.updateComplete;
     await new Promise((done) => setTimeout(done, 400));
 
-    const pickers = deep(editor.shadowRoot, "ha-color-picker");
+    // The per-column pickers, not every colour the form offers — a warning
+    // colour is picked the same way and is not one of these.
+    const pickers = deep(editor.shadowRoot, "ha-color-picker").filter((one) =>
+      (one.label ?? "").startsWith("Colour of"),
+    );
     const seen = {
       pickers: pickers.length,
       labels: pickers.map((one) => one.label),

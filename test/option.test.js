@@ -389,3 +389,50 @@ test("the series take their colour through the theme", () => {
   assert.equal(built.series[0].itemStyle.color, "#f44336");
   assert.equal(built.series[0].lineStyle.color, "#f44336");
 });
+
+test("a value past a limit is drawn in the warning colour", () => {
+  const theme = { ...THEME, colour: (name) => ({ red: "#f44336" })[name] ?? "" };
+  const built = buildOption(
+    toChart(TIME_ROWS, "time", ["average", "maximum"]),
+    { type: "custom:scribe-card", sql: "…", warn_above: 25, colors: ["#0072b2"] },
+    theme,
+  );
+
+  assert.equal(built.visualMap.type, "piecewise");
+  assert.equal(built.visualMap.show, false, "the card draws it, it does not offer it as a control");
+  assert.deepEqual(built.visualMap.pieces, [{ gt: 25, color: "#f44336" }]);
+  // Everything below the limit keeps the colour the series was given.
+  assert.equal(built.visualMap.outOfRange.color, "#0072b2");
+  assert.equal(built.visualMap.seriesIndex, 0);
+});
+
+test("a limit can be a floor as well as a ceiling", () => {
+  const built = option(TIME_ROWS, { warn_below: 0, warn_above: 30, warn_color: "#000" });
+  assert.deepEqual(
+    built.visualMap.pieces.map((one) => Object.keys(one)[0]),
+    ["lt", "gt"],
+  );
+});
+
+test("a range of values can be a gradient instead", () => {
+  const built = option(TIME_ROWS, { scale_from: 0, scale_to: 40, scale_colors: ["#00f", "#f00"] });
+
+  assert.equal(built.visualMap.type, "continuous");
+  assert.deepEqual([built.visualMap.min, built.visualMap.max], [0, 40]);
+  assert.deepEqual(built.visualMap.inRange.color, ["#00f", "#f00"]);
+  // A limit wins over a range: one of them has to.
+  assert.equal(
+    option(TIME_ROWS, { warn_above: 25, scale_from: 0, scale_to: 40 }).visualMap.type,
+    "piecewise",
+  );
+  // A range that is not one is not a gradient.
+  assert.equal(option(TIME_ROWS, { scale_from: 40, scale_to: 0 }).visualMap, undefined);
+  assert.equal(option(TIME_ROWS).visualMap, undefined, "nothing unless asked for");
+});
+
+test("colour by value follows the axis it is drawn against", () => {
+  // The first column is on the right, so the colouring belongs to the second.
+  const built = option(TIME_ROWS, { y2: "average", warn_above: 25 });
+  assert.equal(built.visualMap.seriesIndex, 1);
+  assert.equal(built.series[1].name, "maximum");
+});
